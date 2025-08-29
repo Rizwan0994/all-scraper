@@ -13,6 +13,7 @@ import random
 import logging
 import requests
 import re
+import signal
 from urllib.parse import urljoin, quote_plus, quote
 from dataclasses import dataclass, asdict
 from typing import List, Optional, Dict, Any
@@ -183,6 +184,25 @@ class UniversalScraper:
         # Create data directory
         os.makedirs('scraped_data', exist_ok=True)
         os.makedirs('images', exist_ok=True)
+        
+        # Setup signal handlers for graceful shutdown
+        self.setup_signal_handlers()
+        
+        # Load existing data from persistent files
+        self.load_existing_data()
+    
+    def setup_signal_handlers(self):
+        """Setup signal handlers for graceful shutdown"""
+        def signal_handler(signum, frame):
+            logger.info(f"Received signal {signum}, saving data and shutting down gracefully...")
+            self.cleanup()
+            sys.exit(0)
+        
+        try:
+            signal.signal(signal.SIGINT, signal_handler)
+            signal.signal(signal.SIGTERM, signal_handler)
+        except Exception as e:
+            logger.warning(f"Could not setup signal handlers: {e}")
     
     def setup_session(self):
         """Setup session with advanced anti-detection"""
@@ -757,8 +777,8 @@ class UniversalScraper:
             
             self.socketio.emit('stats_update', self.current_stats)
         
-        # Save to file every 5 products (no database saving)
-        if len(self.scraped_products) % 5 == 0:
+        # Save to persistent files immediately for first product, then every 5 products
+        if len(self.scraped_products) == 1 or len(self.scraped_products) % 5 == 0:
             self.save_products_periodically()
         
         logger.info(f"Product added: {product.product_name[:50]}... ({product.source_site})")
@@ -1364,18 +1384,94 @@ class UniversalScraper:
         
         return variants[:6]  # Limit to 6 variants max
     
+    def load_existing_data(self):
+        """Load existing data from persistent files when scraper starts"""
+        try:
+            # Try to load from JSON file first
+            json_file = "scraped_data/products.json"
+            if os.path.exists(json_file):
+                with open(json_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    for item in data:
+                        # Convert dict back to Product object
+                        product = Product(**item)
+                        self.scraped_products.append(product)
+                        self.scraped_urls.add(product.source_url)
+                    
+                    # Update stats
+                    self.current_stats['total_products'] = len(self.scraped_products)
+                    for product in self.scraped_products:
+                        site = product.source_site
+                        self.current_stats['site_breakdown'][site] = self.current_stats['site_breakdown'].get(site, 0) + 1
+                    
+                    logger.info(f"Loaded {len(self.scraped_products)} existing products from {json_file}")
+                    return
+            
+            # If no JSON file, try CSV file
+            csv_file = "scraped_data/products.csv"
+            if os.path.exists(csv_file):
+                import csv
+                with open(csv_file, 'r', encoding='utf-8') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        # Convert CSV row to Product object
+                        product_data = {}
+                        for key, value in row.items():
+                            if key in ['unit_price', 'purchase_price', 'weight', 'height', 'length', 'width', 'rating', 'discount']:
+                                try:
+                                    product_data[key] = float(value) if value else 0.0
+                                except ValueError:
+                                    product_data[key] = 0.0
+                            elif key in ['current_stock', 'review_count']:
+                                try:
+                                    product_data[key] = int(value) if value else 0
+                                except ValueError:
+                                    product_data[key] = 0
+                            elif key in ['product_images', 'additional_images', 'variants']:
+                                try:
+                                    product_data[key] = json.loads(value) if value else []
+                                except (json.JSONDecodeError, ValueError):
+                                    product_data[key] = []
+                            else:
+                                product_data[key] = value if value else ""
+                        
+                        product = Product(**product_data)
+                        self.scraped_products.append(product)
+                        self.scraped_urls.add(product.source_url)
+                    
+                    # Update stats
+                    self.current_stats['total_products'] = len(self.scraped_products)
+                    for product in self.scraped_products:
+                        site = product.source_site
+                        self.current_stats['site_breakdown'][site] = self.current_stats['site_breakdown'].get(site, 0) + 1
+                    
+                    logger.info(f"Loaded {len(self.scraped_products)} existing products from {csv_file}")
+                    
+        except Exception as e:
+            logger.error(f"Error loading existing data: {e}")
+            # Continue with empty data if loading fails
+    
 
     
     def save_products_periodically(self):
         """Save products periodically to prevent data loss"""
         if len(self.scraped_products) % 5 == 0 and self.scraped_products:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"scraped_data/products_backup_{timestamp}.json"
-            
             try:
-                with open(filename, 'w', encoding='utf-8') as f:
+                # Save to persistent JSON file
+                json_file = "scraped_data/products.json"
+                with open(json_file, 'w', encoding='utf-8') as f:
                     json.dump([asdict(p) for p in self.scraped_products], f, indent=2, ensure_ascii=False)
-                logger.info(f"Products saved to {filename}")
+                
+                # Save to persistent CSV file
+                csv_file = "scraped_data/products.csv"
+                with open(csv_file, 'w', newline='', encoding='utf-8') as f:
+                    if self.scraped_products:
+                        writer = csv.DictWriter(f, fieldnames=asdict(self.scraped_products[0]).keys())
+                        writer.writeheader()
+                        for product in self.scraped_products:
+                            writer.writerow(asdict(product))
+                
+                logger.info(f"Products saved to persistent files: {json_file}, {csv_file}")
             except Exception as e:
                 logger.error(f"Failed to save products: {e}")
     
@@ -2062,21 +2158,21 @@ class UniversalScraper:
         return cleaned_products
     
     def save_products(self, products):
-        """Save products to files"""
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        """Save products to persistent files"""
         saved_files = []
         
         # Save as JSON
-        json_file = f"scraped_data/products_{timestamp}.json"
+        json_file = "scraped_data/products.json"
         try:
             with open(json_file, 'w', encoding='utf-8') as f:
                 json.dump([asdict(p) for p in products], f, indent=2, ensure_ascii=False)
             saved_files.append(json_file)
+            logger.info(f"Products saved to {json_file}")
         except Exception as e:
             logger.error(f"Failed to save JSON: {e}")
         
         # Save as CSV
-        csv_file = f"scraped_data/products_{timestamp}.csv"
+        csv_file = "scraped_data/products.csv"
         try:
             with open(csv_file, 'w', newline='', encoding='utf-8') as f:
                 if products:
@@ -2085,7 +2181,36 @@ class UniversalScraper:
                     for product in products:
                         writer.writerow(asdict(product))
             saved_files.append(csv_file)
+            logger.info(f"Products saved to {csv_file}")
         except Exception as e:
             logger.error(f"Failed to save CSV: {e}")
         
         return saved_files
+    
+    def cleanup(self):
+        """Cleanup and save data when scraper is stopped"""
+        try:
+            if self.scraped_products:
+                logger.info("Saving data before cleanup...")
+                self.save_products_periodically()
+                logger.info(f"Cleanup completed. {len(self.scraped_products)} products saved.")
+        except Exception as e:
+            logger.error(f"Error during cleanup: {e}")
+    
+    def force_save(self):
+        """Force save current data to persistent files"""
+        try:
+            if self.scraped_products:
+                logger.info("Force saving current data...")
+                self.save_products_periodically()
+                return True
+            else:
+                logger.info("No products to save")
+                return False
+        except Exception as e:
+            logger.error(f"Error force saving: {e}")
+            return False
+    
+    def __del__(self):
+        """Destructor to ensure data is saved when scraper is destroyed"""
+        self.cleanup()

@@ -40,8 +40,26 @@ scraper = UniversalScraper(socketio=socketio)
 @app.route('/')
 def index():
     """Main dashboard page"""
-    stats = scraper.get_statistics(scraper.scraped_products)
-    return render_template('index.html', stats=stats)
+    try:
+        # Try to load from persistent files for accurate stats
+        json_file = "scraped_data/products.json"
+        if os.path.exists(json_file):
+            with open(json_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                # Convert to Product objects for stats calculation
+                products = []
+                for item in data:
+                    product = scraper.Product(**item)
+                    products.append(product)
+                stats = scraper.get_statistics(products)
+        else:
+            stats = scraper.get_statistics(scraper.scraped_products)
+        
+        return render_template('index.html', stats=stats)
+    except Exception as e:
+        logger.error(f"Error loading dashboard: {e}")
+        stats = scraper.get_statistics(scraper.scraped_products)
+        return render_template('index.html', stats=stats)
 
 @app.route('/scrape', methods=['POST'])
 def start_scraping():
@@ -74,75 +92,168 @@ def start_scraping():
 
 @app.route('/status')
 def get_status():
-    """Get current scraping status"""
-    stats = scraper.get_statistics(scraper.scraped_products)
-    return jsonify(stats)
+    """Get current scraping status from persistent files"""
+    try:
+        # Try to load from persistent files for accurate stats
+        json_file = "scraped_data/products.json"
+        if os.path.exists(json_file):
+            with open(json_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                # Convert to Product objects for stats calculation
+                products = []
+                for item in data:
+                    product = scraper.Product(**item)
+                    products.append(product)
+                stats = scraper.get_statistics(products)
+        else:
+            stats = scraper.get_statistics(scraper.scraped_products)
+        
+        return jsonify(stats)
+    except Exception as e:
+        logger.error(f"Error loading status: {e}")
+        stats = scraper.get_statistics(scraper.scraped_products)
+        return jsonify(stats)
 
 @app.route('/products')
 def get_products():
-    """Get all scraped products"""
-    products = []
-    for product in scraper.scraped_products:
-        products.append({
-            'title': product.product_name,
-            'price': product.unit_price,
-            'category': product.category,
-            'sub_category': product.sub_category,
-            'source_site': product.source_site,
-            'rating': product.rating
-        })
-    return jsonify(products)
+    """Get all scraped products from persistent files"""
+    try:
+        # Try to load from persistent JSON file first
+        json_file = "scraped_data/products.json"
+        if os.path.exists(json_file):
+            with open(json_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                products = []
+                for item in data:
+                    products.append({
+                        'title': item.get('product_name', ''),
+                        'price': item.get('unit_price', 0.0),
+                        'category': item.get('category', ''),
+                        'sub_category': item.get('sub_category', ''),
+                        'source_site': item.get('source_site', ''),
+                        'rating': item.get('rating', 0.0),
+                        'image': item.get('product_images', [None])[0] if item.get('product_images') else None
+                    })
+                logger.info(f"Loaded {len(products)} products from persistent file")
+                return jsonify(products)
+        
+        # If no JSON file, try CSV file
+        csv_file = "scraped_data/products.csv"
+        if os.path.exists(csv_file):
+            products = []
+            with open(csv_file, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    products.append({
+                        'title': row.get('product_name', ''),
+                        'price': float(row.get('unit_price', 0.0)) if row.get('unit_price') else 0.0,
+                        'category': row.get('category', ''),
+                        'sub_category': row.get('sub_category', ''),
+                        'source_site': row.get('source_site', ''),
+                        'rating': float(row.get('rating', 0.0)) if row.get('rating') else 0.0,
+                        'image': None  # CSV doesn't store images
+                    })
+                logger.info(f"Loaded {len(products)} products from CSV file")
+                return jsonify(products)
+        
+        # If no persistent files, return current scraper data
+        products = []
+        for product in scraper.scraped_products:
+            products.append({
+                'title': product.product_name,
+                'price': product.unit_price,
+                'category': product.category,
+                'sub_category': product.sub_category,
+                'source_site': product.source_site,
+                'rating': product.rating,
+                'image': product.product_images[0] if product.product_images else None
+            })
+        return jsonify(products)
+        
+    except Exception as e:
+        logger.error(f"Error loading products: {e}")
+        return jsonify([])
 
 @app.route('/download/<format>')
 def download_data(format):
-    """Download scraped data"""
-    if format == 'json':
-        data = []
-        for product in scraper.scraped_products:
-            data.append({
-                'product_name': product.product_name,
-                'unit_price': product.unit_price,
-                'category': product.category,
-                'source_site': product.source_site,
-                'source_url': product.source_url,
-                'rating': product.rating,
-                'scraped_at': product.scraped_at
-            })
+    """Download scraped data from persistent files"""
+    try:
+        if format == 'json':
+            # Try to serve the persistent JSON file
+            json_file = "scraped_data/products.json"
+            if os.path.exists(json_file):
+                return send_file(
+                    json_file,
+                    mimetype='application/json',
+                    as_attachment=True,
+                    download_name='products.json'
+                )
+            else:
+                # Fallback to current data
+                data = []
+                for product in scraper.scraped_products:
+                    data.append({
+                        'product_name': product.product_name,
+                        'unit_price': product.unit_price,
+                        'category': product.category,
+                        'source_site': product.source_site,
+                        'source_url': product.source_url,
+                        'rating': product.rating,
+                        'scraped_at': product.scraped_at
+                    })
+                
+                output = io.StringIO()
+                json.dump(data, output, indent=2, default=str)
+                output.seek(0)
+                
+                return send_file(
+                    io.BytesIO(output.getvalue().encode()),
+                    mimetype='application/json',
+                    as_attachment=True,
+                    download_name='products.json'
+                )
         
-        output = io.StringIO()
-        json.dump(data, output, indent=2, default=str)
-        output.seek(0)
+        elif format == 'csv':
+            # Try to serve the persistent CSV file
+            csv_file = "scraped_data/products.csv"
+            if os.path.exists(csv_file):
+                return send_file(
+                    csv_file,
+                    mimetype='text/csv',
+                    as_attachment=True,
+                    download_name='products.csv'
+                )
+            else:
+                # Fallback to current data
+                output = io.StringIO()
+                writer = csv.writer(output)
+                writer.writerow(['Product Name', 'Price', 'Category', 'Site', 'URL', 'Rating', 'Scraped At'])
+                
+                for product in scraper.scraped_products:
+                    writer.writerow([
+                        product.product_name,
+                        product.unit_price,
+                        product.category,
+                        product.source_site,
+                        product.source_url,
+                        product.rating,
+                        product.scraped_at
+                    ])
+                
+                output.seek(0)
+                return send_file(
+                    io.BytesIO(output.getvalue().encode()),
+                    mimetype='text/csv',
+                    as_attachment=True,
+                    download_name='products.csv'
+                )
         
-        return send_file(
-            io.BytesIO(output.getvalue().encode()),
-            mimetype='application/json',
-            as_attachment=True,
-            download_name=f'products_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json'
-        )
-    
-    elif format == 'csv':
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(['Product Name', 'Price', 'Category', 'Site', 'URL', 'Rating', 'Scraped At'])
-        
-        for product in scraper.scraped_products:
-            writer.writerow([
-                product.product_name,
-                product.unit_price,
-                product.category,
-                product.source_site,
-                product.source_url,
-                product.rating,
-                product.scraped_at
-            ])
-        
-        output.seek(0)
-        return send_file(
-            io.BytesIO(output.getvalue().encode()),
-            mimetype='text/csv',
-            as_attachment=True,
-            download_name=f'products_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
-        )
+        else:
+            return jsonify({'error': 'Invalid format. Use json or csv'}), 400
+            
+    except Exception as e:
+        logger.error(f"Download error: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/db/connect', methods=['POST'])
 def test_database_connection():
@@ -174,6 +285,28 @@ def insert_products():
             'success': False,
             'error': str(e)
         }), 400
+
+@app.route('/api/save', methods=['POST'])
+def save_data():
+    """Manually save current data to persistent files"""
+    try:
+        success = scraper.force_save()
+        if success:
+            return jsonify({
+                'success': True,
+                'message': f'Data saved successfully. {len(scraper.scraped_products)} products saved.'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': 'No data to save'
+            })
+    except Exception as e:
+        logger.error(f"Save error: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 def main():
     """Main entry point"""
