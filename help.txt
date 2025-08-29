@@ -1,0 +1,76 @@
+Create Product – Field Requirements
+1. Basic Information
+Field Name	Required	Type / Input Format	Example Value	Notes
+Product Name	Yes	Text	Zee	Must be unique & descriptive
+Product Slug	Optional	Text / Auto-generated	product-slug	Usually lowercase, hyphen-separated
+Unit	Optional	Dropdown (e.g., KG, Litre)	KG	Measurement unit for product
+Minimum Purchase Qty	Yes	Number (integer)	1	Lowest quantity buyer can purchase
+Maximum Purchase Qty	Optional	Number (integer)	1	Highest quantity buyer can purchase
+Meta Title	Optional	Text	Best Zee Product	Used for SEO
+Meta Image	Optional	Image upload	meta.jpg	Image used for SEO sharing
+Status	Optional	Dropdown (Published/Draft)	Published	Product visibility
+Store	Yes	Dropdown (Select from list)	Select Stores	Which store this belongs to
+Brand	Optional	Dropdown (Brand list)	Audi	Related product brand
+Category	Yes	Dropdown	Harriet Howe	Main category
+Sub Category	Optional	Dropdown (Depends on Category)	Select Sub Category	Second-level category
+Child Category	Optional	Dropdown (Depends on Sub Cat.)	Select Child Category	Third-level category
+Product Type	Optional	Dropdown (Single / Variant)	Single Product	Variant = multiple sizes/colors
+Purchase Price	Yes	Number (currency)	100	Buying price
+Unit Price	Yes	Number (currency)	120	Selling price
+SKU	Optional	Text / Alphanumeric	SKU123	Stock Keeping Unit
+Stock Status	Yes	Dropdown (In Stock / Out of Stock)	Out of Stock	Stock availability
+Current Stock	Optional	Number (integer)	50	Current quantity in inventory
+Discount	Optional	Number	0	Discount value
+Discount Type	Optional	Dropdown (Amount / %)	%	How discount is applied
+Product Images	Optional	Image upload	image1.jpg	Can upload multiple images
+
+2. Delivery & Dimensions
+Field Name	Required	Type / Input Format	Example Value	Notes
+Standard Delivery Time	Optional	Number + unit	24 hr(s)	Estimated delivery time
+Weight	Optional	Number + unit (g)	0	Product weight
+Height	Optional	Number + unit (cm)	0	Product height
+Length	Optional	Number + unit (cm)	0	Product length
+Width	Optional	Number + unit (cm)	0	Product width
+
+3. Descriptions
+Field Name	Required	Type / Input Format	Example Value
+Product Description	Yes	Rich Text / HTML	"This is a premium Zee..."
+Meta Tags Description	Optional	Text	"Buy Zee online at best price"
+
+4. Images
+Multiple image upload support
+
+Accepted formats: JPG, PNG, WebP
+
+Recommended size: 800x800 px
+
+Category & Subcategory Reference
+Here is the main and subcategory list for selection when creating products:
+
+Electronics → Mobile Phones, Laptops, Cameras, Audio, Televisions
+
+Fashion → Men, Women, Kids, Sportswear, Accessories
+
+Home Appliances → Kitchen, Cleaning, Cooling, Heating, Laundry
+
+Books → Fiction, Non-Fiction, Education, Children, Comics
+
+Automotive → Car Accessories, Motorcycles, Car Care, Tires, Electronics
+
+Sports & Outdoors → Outdoor Gear, Fitness, Team Sports, Water Sports, Cycling
+
+Beauty & Personal Care → Skincare, Makeup, Hair Care, Fragrances, Men's Grooming
+
+Toys & Games → Action Figures, Puzzles, Board Games, Educational Toys, Outdoor Toys
+
+Grocery → Beverages, Snacks, Staples, Dairy, Meat
+
+Health & Wellness → Supplements, Personal Care, Fitness Equipment, Medical Supplies, Mental Wellness
+
+Furniture → Living Room, Bedroom, Office Furniture, Dining Room, Outdoor Furniture
+
+Pets → Dog Supplies, Cat Supplies, Fish Supplies, Bird Supplies, Reptile Supplies
+
+Art & Crafts → Painting, Sewing, Scrapbooking, DIY Projects, Drawing
+
+Stationery → Notebooks, Writing Instruments, Office Supplies, Art Supplies, Planners

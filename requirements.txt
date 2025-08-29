@@ -1,0 +1,42 @@
+# Web Scraping
+scrapy>=2.8.0
+selenium>=4.10.0
+beautifulsoup4>=4.11.0
+requests>=2.28.0
+fake-useragent>=1.4.0
+
+# Advanced Anti-Detection
+cloudscraper>=1.2.70
+undetected-chromedriver>=3.5.0
+selenium-stealth>=1.0.6
+aiohttp>=3.8.0
+requests-html>=0.10.0
+
+# Data Processing - Using latest compatible versions
+pandas>=2.0.0
+numpy>=1.24.0
+pillow>=10.0.0
+
+# Database
+sqlalchemy>=2.0.0
+pymongo>=4.5.0
+mysql-connector-python>=8.1.0
+psycopg2-binary>=2.9.0
+
+# Web Framework
+flask>=2.3.0
+flask-cors>=4.0.0
+flask-socketio>=5.3.0
+
+# Utilities
+python-dotenv>=1.0.0
+click>=8.1.0
+tqdm>=4.65.0
+schedule>=1.2.0
+
+# Image Processing
+requests-html>=0.10.0
+urllib3>=2.0.0
+
+# Proxy Support
+requests[socks]>=2.28.0
