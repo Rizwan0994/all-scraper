@@ -1,0 +1,9 @@
+{"type":"table","name":"product_variations","database":"scrapping","data":
+    [
+    {"id":"13","product_id":"179","sku":"2","purchase_price":"1400.00","unit_price":"1610.00","current_stock":"1","created_by":"1","updated_by":"1","deleted_at":null,"created_at":"2025-07-10 11:12:54","updated_at":"2025-07-10 11:12:54","discount":"0","discount_type":"12","combination":"single_combination","stock_status":null}
+    ]
+    }
+
+
+
+

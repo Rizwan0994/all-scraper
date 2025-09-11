@@ -1,0 +1,13 @@
+[
+{"type":"header","version":"5.2.2","comment":"Export to JSON plugin for PHPMyAdmin"},
+{"type":"database","name":"scrapping"},
+{"type":"table","name":"images","database":"scrapping","data":
+[
+
+{"id":"7","url":"https:\/\/staging.miplimited.com\/storage\/product\/meta\/7EsLXKb9RUo7Pp1ZQtKKR714vtINxlbYJPN63hPR.jpg","imageable_id":"10","imageable_type":"App\\Models\\Product","type":"meta","created_by":null,"updated_by":null,"deleted_at":null,"created_at":"2025-04-05 10:48:47","updated_at":"2025-04-05 10:48:47","alt":null},
+{"id":"8","url":"https:\/\/staging.miplimited.com\/storage\/product\/images\/f8EGpMSdn0tdHmTDsPPL1xJNMSQubv11HpFzgM5I.jpg","imageable_id":"10","imageable_type":"App\\Models\\Product","type":"product","created_by":null,"updated_by":null,"deleted_at":null,"created_at":"2025-04-05 10:48:47","updated_at":"2025-04-05 10:48:47","alt":null},
+{"id":"9","url":"https:\/\/staging.miplimited.com\/storage\/product\/images\/qpLOJaNsIRDLZss2hew1Zv3TZD0UMVLIPTRlF8sl.jpg","imageable_id":"10","imageable_type":"App\\Models\\Product","type":"product","created_by":null,"updated_by":null,"deleted_at":null,"created_at":"2025-04-05 10:48:47","updated_at":"2025-04-05 10:48:47","alt":null},
+{"id":"10","url":"https:\/\/staging.miplimited.com\/storage\/product\/thumbnail\/iNaI4nPKFaT6ZTtd4mnpr1pcNtGlylV6A4l5ipNf.jpg","imageable_id":"10","imageable_type":"App\\Models\\Product","type":"thumbnail","created_by":null,"updated_by":null,"deleted_at":null,"created_at":"2025-04-05 10:48:47","updated_at":"2025-04-05 10:48:47","alt":null}
+]
+}
+]

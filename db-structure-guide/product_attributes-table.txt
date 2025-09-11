@@ -1,0 +1,9 @@
+[
+{"type":"header","version":"5.2.2","comment":"Export to JSON plugin for PHPMyAdmin"},
+{"type":"database","name":"scrapping"},
+{"type":"table","name":"product_attributes","database":"scrapping","data":
+[
+{"id":"26","product_id":"202","attribute_id":"1","created_by":null,"updated_by":null,"deleted_at":null,"created_at":null,"updated_at":null,"type":"parent"}
+]
+}
+]

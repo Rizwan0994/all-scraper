@@ -214,6 +214,22 @@
                                 <i class="fas fa-cog"></i> Manage Database
                             </button>
                         </div>
+                        
+                        <hr>
+                        
+                        <h6><i class="fas fa-upload"></i> Insert Products</h6>
+                        <div class="d-grid gap-2">
+                            <button class="btn btn-success" onclick="insertAllProducts()" id="insertAllBtn">
+                                <i class="fas fa-upload"></i> Insert All Products (<span id="productCount">0</span>)
+                            </button>
+                            <button class="btn btn-warning" onclick="insertTestProduct()" id="insertTestBtn">
+                                <i class="fas fa-flask"></i> Test Insert (1 Product)
+                            </button>
+                        </div>
+                        
+                        <div id="insertStatus" class="mt-2" style="display: none;">
+                            <!-- Status messages will appear here -->
+                        </div>
                     </div>
                 </div>
             </div>
@@ -366,32 +382,12 @@
                                 <h6>Product Table Settings</h6>
                                 <div class="mb-3">
                                     <label class="form-label">Table Name</label>
-                                    <input type="text" class="form-control" id="tableName" value="products">
+                                    <input type="text" class="form-control" id="tableName" value="products" readonly>
                                 </div>
-                                <div class="mb-3">
-                                    <label class="form-label">Field Mapping</label>
-                                    <div id="fieldMapping">
-                                        <div class="mb-2">
-                                            <label class="form-label">Product Name</label>
-                                            <input type="text" class="form-control" id="custom_product_name" value="product_name">
-                                        </div>
-                                        <div class="mb-2">
-                                            <label class="form-label">Price</label>
-                                            <input type="text" class="form-control" id="custom_unit_price" value="unit_price">
-                                        </div>
-                                        <div class="mb-2">
-                                            <label class="form-label">Category</label>
-                                            <input type="text" class="form-control" id="custom_category" value="category">
-                                        </div>
-                                        <div class="mb-2">
-                                            <label class="form-label">Source Site</label>
-                                            <input type="text" class="form-control" id="custom_source_site" value="source_site">
-                                        </div>
-                                    </div>
+                                <div class="alert alert-info">
+                                    <i class="fas fa-info-circle"></i> 
+                                    <strong>Note:</strong> Use the "Insert Products" buttons in the Database Management section above to insert your scraped products.
                                 </div>
-                                <button class="btn btn-success" onclick="insertProductsToDatabase()">
-                                    <i class="fas fa-upload"></i> Insert Products
-                                </button>
                             </div>
                         </div>
                     </div>

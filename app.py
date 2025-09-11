@@ -17,6 +17,7 @@ import io
 
 # Import our scraper modules
 from scraper.universal_scraper import UniversalScraper
+from db_manager import DatabaseManager
 
 # Configure logging
 logging.basicConfig(
@@ -34,8 +35,9 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your-secret-key-here'
 socketio = SocketIO(app, cors_allowed_origins="*")
 
-# Initialize scraper
+# Initialize scraper and database manager
 scraper = UniversalScraper(socketio=socketio)
+db_manager = DatabaseManager()
 
 @app.route('/')
 def index():
@@ -303,6 +305,106 @@ def save_data():
             })
     except Exception as e:
         logger.error(f"Save error: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/db/insert-all', methods=['POST'])
+def insert_all_products():
+    """Insert all products from JSON file to database"""
+    try:
+        # Get connection parameters from request
+        data = request.get_json() or {}
+        connection_params = {
+            'host': data.get('host'),
+            'user': data.get('user'),
+            'password': data.get('password'),
+            'database': data.get('database'),
+            'port': data.get('port')
+        }
+        
+        # Load products from JSON file
+        json_file = "scraped_data/products.json"
+        if not os.path.exists(json_file):
+            return jsonify({
+                'success': False,
+                'message': 'No products.json file found. Please scrape some products first.'
+            }), 400
+        
+        with open(json_file, 'r', encoding='utf-8') as f:
+            products = json.load(f)
+        
+        if not products:
+            return jsonify({
+                'success': False,
+                'message': 'No products found in JSON file.'
+            }), 400
+        
+        # Insert all products with connection parameters
+        result = db_manager.insert_products(products, test_mode=False, connection_params=connection_params)
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"Insert all products error: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/db/insert-test', methods=['POST'])
+def insert_test_product():
+    """Insert single product for testing"""
+    try:
+        # Get connection parameters from request
+        data = request.get_json() or {}
+        connection_params = {
+            'host': data.get('host'),
+            'user': data.get('user'),
+            'password': data.get('password'),
+            'database': data.get('database'),
+            'port': data.get('port')
+        }
+        
+        # Load products from JSON file
+        json_file = "scraped_data/products.json"
+        if not os.path.exists(json_file):
+            return jsonify({
+                'success': False,
+                'message': 'No products.json file found. Please scrape some products first.'
+            }), 400
+        
+        with open(json_file, 'r', encoding='utf-8') as f:
+            products = json.load(f)
+        
+        if not products:
+            return jsonify({
+                'success': False,
+                'message': 'No products found in JSON file.'
+            }), 400
+        
+        # Insert only first product for testing with connection parameters
+        result = db_manager.insert_products(products, test_mode=True, connection_params=connection_params)
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"Insert test product error: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/db/product-count')
+def get_product_count():
+    """Get total number of products available for insertion"""
+    try:
+        count = db_manager.get_product_count()
+        return jsonify({
+            'success': True,
+            'count': count
+        })
+    except Exception as e:
+        logger.error(f"Get product count error: {e}")
         return jsonify({
             'success': False,
             'error': str(e)

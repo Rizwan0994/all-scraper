@@ -20,6 +20,12 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Load initial products
     setTimeout(loadProducts, 1000);
+    
+    // Load product count for database insertion
+    setTimeout(loadProductCount, 1500);
+    
+    // Auto-fill database credentials
+    setTimeout(autoFillDatabaseCredentials, 2000);
 });
 
 function initializeFormSubmission() {
@@ -501,4 +507,158 @@ socket.on('scraping_complete', function(data) {
     showCompletionSummary(data);
     updateStatus('ready', 'Complete');
     loadProducts();
+    // Reload product count after scraping
+    loadProductCount();
 });
+
+// Database insertion functions
+async function loadProductCount() {
+    try {
+        const response = await fetch('/api/db/product-count');
+        const data = await response.json();
+        
+        if (data.success) {
+            const countElement = document.getElementById('productCount');
+            if (countElement) {
+                countElement.textContent = data.count;
+            }
+        }
+    } catch (error) {
+        console.error('Error loading product count:', error);
+    }
+}
+
+async function insertAllProducts() {
+    const button = document.getElementById('insertAllBtn');
+    const statusDiv = document.getElementById('insertStatus');
+    
+    // Disable button and show loading
+    button.disabled = true;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Inserting...';
+    statusDiv.style.display = 'block';
+    statusDiv.innerHTML = '<div class="alert alert-info"><i class="fas fa-spinner fa-spin"></i> Inserting all products to database...</div>';
+    
+    try {
+        // Get connection parameters from UI form
+        const connectionParams = {
+            host: document.getElementById('dbHost').value,
+            user: document.getElementById('dbUsername').value,
+            password: document.getElementById('dbPassword').value,
+            database: document.getElementById('dbName').value,
+            port: parseInt(document.getElementById('dbPort').value)
+        };
+        
+        const response = await fetch('/api/db/insert-all', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(connectionParams)
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            let message = `<div class="alert alert-success"><i class="fas fa-check-circle"></i> ${data.message}</div>`;
+            if (data.inserted > 0 || data.updated > 0) {
+                message += `<div class="mt-2">
+                    <small class="text-muted">
+                        <i class="fas fa-plus-circle text-success"></i> ${data.inserted} inserted | 
+                        <i class="fas fa-edit text-warning"></i> ${data.updated} updated
+                    </small>
+                </div>`;
+            }
+            statusDiv.innerHTML = message;
+        } else {
+            statusDiv.innerHTML = `<div class="alert alert-danger"><i class="fas fa-exclamation-triangle"></i> ${data.message}</div>`;
+        }
+        
+    } catch (error) {
+        statusDiv.innerHTML = `<div class="alert alert-danger"><i class="fas fa-exclamation-triangle"></i> Error: ${error.message}</div>`;
+    } finally {
+        // Re-enable button
+        button.disabled = false;
+        button.innerHTML = '<i class="fas fa-upload"></i> Insert All Products (<span id="productCount">0</span>)';
+        // Reload product count
+        loadProductCount();
+    }
+}
+
+async function insertTestProduct() {
+    const button = document.getElementById('insertTestBtn');
+    const statusDiv = document.getElementById('insertStatus');
+    
+    // Disable button and show loading
+    button.disabled = true;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Testing...';
+    statusDiv.style.display = 'block';
+    statusDiv.innerHTML = '<div class="alert alert-info"><i class="fas fa-spinner fa-spin"></i> Testing insertion with 1 product...</div>';
+    
+    try {
+        // Get connection parameters from UI form
+        const connectionParams = {
+            host: document.getElementById('dbHost').value,
+            user: document.getElementById('dbUsername').value,
+            password: document.getElementById('dbPassword').value,
+            database: document.getElementById('dbName').value,
+            port: parseInt(document.getElementById('dbPort').value)
+        };
+        
+        const response = await fetch('/api/db/insert-test', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(connectionParams)
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            let message = `<div class="alert alert-success"><i class="fas fa-check-circle"></i> ${data.message}</div>`;
+            if (data.inserted > 0 || data.updated > 0) {
+                message += `<div class="mt-2">
+                    <small class="text-muted">
+                        <i class="fas fa-plus-circle text-success"></i> ${data.inserted} inserted | 
+                        <i class="fas fa-edit text-warning"></i> ${data.updated} updated
+                    </small>
+                </div>`;
+            }
+            statusDiv.innerHTML = message;
+        } else {
+            statusDiv.innerHTML = `<div class="alert alert-danger"><i class="fas fa-exclamation-triangle"></i> ${data.message}</div>`;
+        }
+        
+    } catch (error) {
+        statusDiv.innerHTML = `<div class="alert alert-danger"><i class="fas fa-exclamation-triangle"></i> Error: ${error.message}</div>`;
+    } finally {
+        // Re-enable button
+        button.disabled = false;
+        button.innerHTML = '<i class="fas fa-flask"></i> Test Insert (1 Product)';
+    }
+}
+
+// Auto-fill database credentials from file
+async function autoFillDatabaseCredentials() {
+    try {
+        // Auto-fill the database connection form with credentials from file
+        const dbType = document.getElementById('dbType');
+        const dbHost = document.getElementById('dbHost');
+        const dbPort = document.getElementById('dbPort');
+        const dbName = document.getElementById('dbName');
+        const dbUsername = document.getElementById('dbUsername');
+        const dbPassword = document.getElementById('dbPassword');
+        
+        if (dbType && dbHost && dbPort && dbName && dbUsername && dbPassword) {
+            // Set MySQL as default
+            dbType.value = 'mysql';
+            
+            // Auto-fill with credentials from file
+            dbHost.value = '153.92.208.43';
+            dbPort.value = '3306';
+            dbName.value = 'scrapping';
+            dbUsername.value = 'scrapping';
+            dbPassword.value = 'el6xBRHruZ5BWqGhgvGA';
+            
+            console.log('Database credentials auto-filled from file');
+        }
+    } catch (error) {
+        console.error('Error auto-filling database credentials:', error);
+    }
+}
