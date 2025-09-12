@@ -317,6 +317,8 @@ class DatabaseManager:
                     '1'  # stock_status
                 )
                 cursor.execute(insert_query, values)
+                variation_id = cursor.lastrowid
+                logger.info(f"Inserted single variation with ID: {variation_id}")
             else:
                 # Insert each variant
                 for variant in variants:
@@ -343,9 +345,54 @@ class DatabaseManager:
                         '1'  # stock_status
                     )
                     cursor.execute(insert_query, values)
+                    variation_id = cursor.lastrowid
+                    logger.info(f"Inserted variation with ID: {variation_id}")
+                    
+                    # Insert variant-specific images if they exist
+                    variant_images = variant.get('images', [])
+                    if variant_images:
+                        self._insert_variant_images(cursor, variation_id, variant_images, product)
                     
         except Exception as e:
             logger.error(f"Error inserting product variations: {e}")
+    
+    def _insert_variant_images(self, cursor, variation_id, variant_images, product):
+        """Insert variant-specific images into images table"""
+        try:
+            logger.info(f"Inserting {len(variant_images)} images for variation ID: {variation_id}")
+            
+            for i, image_url in enumerate(variant_images):
+                if image_url and image_url.strip():
+                    insert_query = """
+                    INSERT INTO images (
+                        url, imageable_id, imageable_type, type, created_by, updated_by,
+                        created_at, updated_at, alt
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """
+                    
+                    # Generate alt text from product name and variant info
+                    alt_text = f"{product.get('product_name', 'Product')} - Variant Image {i+1}"
+                    
+                    values = (
+                        image_url.strip(),  # url
+                        variation_id,  # imageable_id (variation ID)
+                        'App\\Models\\ProductVariation',  # imageable_type
+                        'product_variation',  # type
+                        None,  # created_by
+                        None,  # updated_by
+                        datetime.now().strftime('%Y-%m-%d %H:%M:%S'),  # created_at
+                        datetime.now().strftime('%Y-%m-%d %H:%M:%S'),  # updated_at
+                        alt_text  # alt
+                    )
+                    
+                    cursor.execute(insert_query, values)
+                    image_id = cursor.lastrowid
+                    logger.info(f"Inserted variant image {i+1} with ID {image_id}: {image_url[:50]}...")
+                else:
+                    logger.warning(f"Skipping empty variant image URL at index {i}")
+                    
+        except Exception as e:
+            logger.error(f"Error inserting variant images: {e}")
     
     def _insert_product_images(self, cursor, product_id, product):
         """Insert product images into images table"""
