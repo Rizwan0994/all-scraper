@@ -16,7 +16,7 @@ import csv
 import io
 
 # Import our scraper modules
-from scraper.universal_scraper import UniversalScraper
+from scraper.universal_scraper import UniversalScraper, Product
 from db_manager import DatabaseManager
 
 # Configure logging
@@ -51,7 +51,7 @@ def index():
                 # Convert to Product objects for stats calculation
                 products = []
                 for item in data:
-                    product = scraper.Product(**item)
+                    product = Product(**item)
                     products.append(product)
                 stats = scraper.get_statistics(products)
         else:
@@ -104,7 +104,7 @@ def get_status():
                 # Convert to Product objects for stats calculation
                 products = []
                 for item in data:
-                    product = scraper.Product(**item)
+                    product = Product(**item)
                     products.append(product)
                 stats = scraper.get_statistics(products)
         else:
