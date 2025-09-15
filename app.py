@@ -8,7 +8,7 @@ import sys
 import os
 import logging
 import webbrowser
-from flask import Flask, render_template, request, jsonify, send_file
+from flask import Flask, render_template, request, jsonify, send_file, session, redirect, url_for
 from flask_socketio import SocketIO
 from datetime import datetime
 import json
@@ -39,9 +39,36 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 scraper = UniversalScraper(socketio=socketio)
 db_manager = DatabaseManager()
 
+# Authentication configuration
+ADMIN_PASSWORD = "scraper@123"  # Change this to your desired password
+
+def check_auth():
+    """Check if user is authenticated"""
+    return session.get('authenticated', False)
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    """Login page"""
+    if request.method == 'POST':
+        password = request.form.get('password')
+        if password == ADMIN_PASSWORD:
+            session['authenticated'] = True
+            return redirect(url_for('index'))
+        else:
+            return render_template('login.html', error='Invalid password')
+    return render_template('login.html')
+
+@app.route('/logout')
+def logout():
+    """Logout user"""
+    session.pop('authenticated', None)
+    return redirect(url_for('login'))
+
 @app.route('/')
 def index():
     """Main dashboard page"""
+    if not check_auth():
+        return redirect(url_for('login'))
     try:
         # Try to load from persistent files for accurate stats
         json_file = "scraped_data/products.json"
@@ -66,6 +93,8 @@ def index():
 @app.route('/scrape', methods=['POST'])
 def start_scraping():
     """Start scraping process"""
+    if not check_auth():
+        return jsonify({'status': 'error', 'error': 'Authentication required'}), 401
     try:
         data = request.get_json()
         keywords = data.get('keywords', '').split(',')
