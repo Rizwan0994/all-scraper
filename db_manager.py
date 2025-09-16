@@ -17,6 +17,10 @@ class DatabaseManager:
     def __init__(self):
         self.connection = None
         self.credentials = self.load_credentials()
+        # Caches to reduce DB lookups per run
+        self._attribute_parent_cache = {}
+        # maps parent_id -> { normalized_child_name: child_id }
+        self._attribute_children_cache = {}
     
     def load_credentials(self):
         """Load database credentials from db-credential.tx file"""
@@ -254,35 +258,26 @@ class DatabaseManager:
             return None
     
     def _insert_product_attributes(self, cursor, product_id, product):
-        """Insert product attributes"""
+        """Insert product attributes derived from product-level fields and variants.
+
+        - Ensures attribute parents/values exist in `attributes` table
+        - Inserts rows into `product_attributes` for parents (type='parent') and used values (type='child')
+        """
         try:
-            # Map category to attributes (simplified mapping)
-            category = product.get('category', '').lower()
-            
-            # Define category to attribute mapping
-            category_attributes = {
-                'electronics': [1, 12, 27],  # Color, Size, Brand
-                'toys': [1, 12, 27],  # Color, Size, Brand
-                'clothing': [1, 12, 18, 27],  # Color, Size, Material, Brand
-            }
-            
-            # Get attributes for this category
-            attributes = category_attributes.get(category, [1, 12])  # Default: Color, Size
-            
-            for attr_id in attributes:
-                insert_query = """
-                INSERT INTO product_attributes (product_id, attribute_id, type, created_at, updated_at)
-                VALUES (%s, %s, %s, %s, %s)
-                """
-                values = (
-                    product_id,
-                    attr_id,
-                    'parent',
-                    datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                    datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                )
-                cursor.execute(insert_query, values)
-                
+            # 1) Collect attribute -> set(values) from product
+            attribute_to_values = self._collect_product_attribute_values(product)
+
+            # 2) Ensure parents/values exist and insert product_attributes rows
+            for attr_name, values in attribute_to_values.items():
+                parent_id = self._get_or_create_attribute_parent(cursor, attr_name)
+                # Insert parent link (if not exists)
+                self._ensure_product_attribute_link(cursor, product_id, parent_id, 'parent')
+
+                # Insert value links
+                for value_name in values:
+                    child_id = self._get_or_create_attribute_value(cursor, parent_id, value_name)
+                    self._ensure_product_attribute_link(cursor, product_id, child_id, 'child')
+
         except Exception as e:
             logger.error(f"Error inserting product attributes: {e}")
     
@@ -320,7 +315,7 @@ class DatabaseManager:
                     datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                     product.get('discount', 0),
                     '12',  # discount_type
-                    'default_combination',  # Changed from 'single_combination'
+                    'default_combination',
                     '1'  # stock_status
                 )
                 cursor.execute(insert_query, values)
@@ -342,6 +337,9 @@ class DatabaseManager:
             else:
                 # Insert each variant
                 for variant in variants:
+                    # Build combination string using ID-based format parentId:childId|parentId:childId
+                    combination = self._build_variant_combination(cursor, variant, product, product_id)
+
                     insert_query = """
                     INSERT INTO product_variations (
                         product_id, sku, purchase_price, unit_price, current_stock,
@@ -361,7 +359,7 @@ class DatabaseManager:
                         datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                         product.get('discount', 0),
                         '12',  # discount_type
-                        'single_combination',
+                        combination or 'default_combination',
                         '1'  # stock_status
                     )
                     cursor.execute(insert_query, values)
@@ -381,6 +379,174 @@ class DatabaseManager:
                     
         except Exception as e:
             logger.error(f"Error inserting product variations: {e}")
+
+    def _build_variant_combination(self, cursor, variant, product, product_id):
+        """Create ID-based combination string for a variant and ensure product_attributes links.
+
+        Supports variant option structures like:
+        - variant['options'] as dict { name: value }
+        - variant['options'] as list of { name, value }
+        - variant['attributes'] similar to options
+        Falls back to empty string if nothing found.
+        """
+        try:
+            option_pairs = []  # list of (parent_id, child_id)
+
+            # Extract options
+            possible_keys = ['options', 'attributes']
+            found_map = {}
+            for key in possible_keys:
+                raw = variant.get(key)
+                if isinstance(raw, dict):
+                    found_map.update(raw)
+                elif isinstance(raw, list):
+                    for item in raw:
+                        name = (item or {}).get('name')
+                        value = (item or {}).get('value')
+                        if name is not None and value is not None:
+                            found_map[name] = value
+
+            # If no options in variant, try product-level attributes for single attribute variant
+            if not found_map and isinstance(product.get('attributes'), dict):
+                found_map = product.get('attributes')
+
+            for name, value in found_map.items():
+                if value is None:
+                    continue
+                parent_id = self._get_or_create_attribute_parent(cursor, str(name))
+                child_id = self._get_or_create_attribute_value(cursor, parent_id, str(value))
+                option_pairs.append((parent_id, child_id))
+
+                # Ensure product_attributes rows exist
+                self._ensure_product_attribute_link(cursor, product_id, parent_id, 'parent')
+                self._ensure_product_attribute_link(cursor, product_id, child_id, 'child')
+
+            if not option_pairs:
+                return ''
+
+            # Sort by parent_id and format
+            option_pairs.sort(key=lambda p: p[0])
+            combo = '|'.join([f"{pid}:{cid}" for pid, cid in option_pairs])
+            return combo
+        except Exception as e:
+            logger.error(f"Error building variant combination: {e}")
+            return ''
+
+    def _collect_product_attribute_values(self, product):
+        """Return mapping attr_name -> set(values) from product-level fields and variants."""
+        attribute_to_values = {}
+
+        def add(attr_name, value):
+            if value is None:
+                return
+            name_n = self._normalize_text(str(attr_name))
+            value_n = self._normalize_text(str(value))
+            if not name_n or not value_n:
+                return
+            attribute_to_values.setdefault(name_n, set()).add(value_n)
+
+        # Common product-level keys
+        for key in ['color', 'size', 'material', 'brand', 'weight', 'dimensions', 'capacity', 'flavor', 'pack size', 'pack_size']:
+            if key in product and product.get(key) not in (None, ''):
+                add(key, product.get(key))
+
+        # attributes could be dict or list
+        attrs = product.get('attributes')
+        if isinstance(attrs, dict):
+            for k, v in attrs.items():
+                add(k, v)
+        elif isinstance(attrs, list):
+            for item in attrs:
+                if isinstance(item, dict) and 'name' in item and 'value' in item:
+                    add(item.get('name'), item.get('value'))
+
+        # From variants
+        for variant in product.get('variants', []) or []:
+            for key in ['options', 'attributes']:
+                v = variant.get(key)
+                if isinstance(v, dict):
+                    for k, val in v.items():
+                        add(k, val)
+                elif isinstance(v, list):
+                    for item in v:
+                        if isinstance(item, dict) and 'name' in item and 'value' in item:
+                            add(item.get('name'), item.get('value'))
+
+        return attribute_to_values
+
+    def _normalize_text(self, text):
+        try:
+            return ' '.join(text.strip().split()).lower()
+        except Exception:
+            return ''
+
+    def _get_or_create_attribute_parent(self, cursor, name):
+        """Return id for parent attribute (parent_id IS NULL), creating if needed."""
+        normalized = self._normalize_text(name)
+        if normalized in self._attribute_parent_cache:
+            return self._attribute_parent_cache[normalized]
+
+        select_sql = "SELECT id FROM attributes WHERE LOWER(name) = %s AND parent_id IS NULL LIMIT 1"
+        cursor.execute(select_sql, (normalized,))
+        row = cursor.fetchone()
+        if row:
+            parent_id = int(row[0])
+            self._attribute_parent_cache[normalized] = parent_id
+            return parent_id
+
+        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        insert_sql = """
+            INSERT INTO attributes (name, status, `order`, parent_id, created_at, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """
+        cursor.execute(insert_sql, (name.strip(), 'active', 0, None, now, now))
+        parent_id = cursor.lastrowid
+        self._attribute_parent_cache[normalized] = parent_id
+        # init children cache bucket
+        self._attribute_children_cache.setdefault(parent_id, {})
+        return parent_id
+
+    def _get_or_create_attribute_value(self, cursor, parent_id, value_name):
+        """Return id for child attribute value under given parent, creating if needed."""
+        normalized_value = self._normalize_text(value_name)
+        children_cache = self._attribute_children_cache.setdefault(parent_id, {})
+        if normalized_value in children_cache:
+            return children_cache[normalized_value]
+
+        select_sql = "SELECT id FROM attributes WHERE LOWER(name) = %s AND parent_id = %s LIMIT 1"
+        cursor.execute(select_sql, (normalized_value, parent_id))
+        row = cursor.fetchone()
+        if row:
+            child_id = int(row[0])
+            children_cache[normalized_value] = child_id
+            return child_id
+
+        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        insert_sql = """
+            INSERT INTO attributes (name, status, `order`, parent_id, created_at, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """
+        cursor.execute(insert_sql, (value_name.strip(), 'active', 0, parent_id, now, now))
+        child_id = cursor.lastrowid
+        children_cache[normalized_value] = child_id
+        return child_id
+
+    def _ensure_product_attribute_link(self, cursor, product_id, attribute_id, link_type):
+        """Insert into product_attributes if not exists for given product and attribute."""
+        try:
+            check_sql = "SELECT id FROM product_attributes WHERE product_id = %s AND attribute_id = %s AND type = %s LIMIT 1"
+            cursor.execute(check_sql, (product_id, attribute_id, link_type))
+            if cursor.fetchone():
+                return
+
+            insert_sql = """
+                INSERT INTO product_attributes (product_id, attribute_id, type, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s)
+            """
+            now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            cursor.execute(insert_sql, (product_id, attribute_id, link_type, now, now))
+        except Exception as e:
+            logger.error(f"Error ensuring product attribute link: {e}")
     
     def _insert_variant_images(self, cursor, variation_id, variant_images, product):
         """Insert variant-specific images into images table"""
