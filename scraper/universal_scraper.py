@@ -497,10 +497,13 @@ class UniversalScraper:
                     # Rating and reviews
                     rating_elem = item.find('span', class_='a-icon-alt')
                     rating_text = rating_elem.get_text(strip=True) if rating_elem else ""
-                    rating = float(re.findall(r'[\d.]+', rating_text)[0]) if re.findall(r'[\d.]+', rating_text) else round(random.uniform(3.5, 4.8), 1)
+                    if re.findall(r'[\d.]+', rating_text):
+                        rating = float(re.findall(r'[\d.]+', rating_text)[0])
+                    else:
+                        rating = 0.0
                     
                     review_elem = item.find('span', class_='a-size-base')
-                    review_count = int(re.findall(r'[\d,]+', review_elem.get_text(strip=True))[0].replace(',', '')) if review_elem and re.findall(r'[\d,]+', review_elem.get_text(strip=True)) else random.randint(10, 500)
+                    review_count = int(re.findall(r'[\d,]+', review_elem.get_text(strip=True))[0].replace(',', '')) if review_elem and re.findall(r'[\d,]+', review_elem.get_text(strip=True)) else 0
                     
                     # Auto-categorize
                     category, sub_category = categorize_product(title)
@@ -508,16 +511,27 @@ class UniversalScraper:
                     # Generate SKU
                     sku = f"AMZ-{keyword[:3].upper()}-{i+1:04d}"
                     
-                    # Extract variants if available
-                    variants = self.extract_variants(soup, title)
+                    # Extract variants from PRODUCT PAGE, not search results
+                    product_page_response = None
+                    product_soup = None
+                    try:
+                        if product_url:
+                            product_page_response = self.safe_request(product_url)
+                            if product_page_response and product_page_response.status_code == 200:
+                                product_soup = BeautifulSoup(product_page_response.content, 'html.parser')
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch product page for variants: {e}")
+
+                    # Extract variants if available (prefer product_soup)
+                    variants = self.extract_variants(product_soup or soup, title)
                     
                     # REALISTIC VARIANT-IMAGE MAPPING
                     additional_images = all_images[1:] if len(all_images) > 1 else []
                     if variants:
                         logger.info(f"Mapping {len(additional_images)} additional images to {len(variants)} variants realistically")
                         
-                        # Extract variant-specific images from the product page
-                        variant_specific_images = self._extract_variant_images(soup, title)
+                        # Extract variant-specific images from the PRODUCT page
+                        variant_specific_images = self._extract_variant_images(product_soup or soup, title)
                         
                         if variant_specific_images:
                             logger.info(f"Found {len(variant_specific_images)} variant-specific images")
@@ -533,7 +547,7 @@ class UniversalScraper:
                         original_title=title,
                         product_type="Variant" if variants else "Single Product",
                         unit_price=price,
-                        purchase_price=round(price * 0.8, 2),
+                        purchase_price=0.0,
                         sku=sku,
                         category=category,
                         sub_category=sub_category,
@@ -549,7 +563,7 @@ class UniversalScraper:
                         scraped_at=datetime.now().isoformat(),
                         seller_name="Amazon",
                         stock_status="In Stock",
-                        current_stock=random.randint(10, 100),
+                        current_stock=0,
                         variants=variants
                     )
                     
@@ -881,30 +895,40 @@ class UniversalScraper:
                     # Generate SKU
                     sku = f"EBY-{keyword[:3].upper()}-{i+1:04d}"
                     
-                    # Extract variants if available
-                    variants = self.extract_variants(soup, title)
+                    # Extract variants from PRODUCT PAGE for eBay as well
+                    detail_resp = None
+                    detail_soup = None
+                    try:
+                        if product_url:
+                            detail_resp = self.safe_request(product_url)
+                            if detail_resp and detail_resp.status_code == 200:
+                                detail_soup = BeautifulSoup(detail_resp.content, 'html.parser')
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch eBay product page for variants: {e}")
+
+                    variants = self.extract_variants(detail_soup or soup, title)
                     
                     product = Product(
                         product_name=title,
                         original_title=title,
                         product_type="Single Product",
                         unit_price=price,
-                        purchase_price=round(price * 0.85, 2),
+                        purchase_price=0.0,
                         sku=sku,
                         category=category,
                         sub_category=sub_category,
                         product_description=f"Quality {title} from eBay with buyer protection and money-back guarantee",
                         meta_tags_description=f"Find great deals on {title} at eBay with fast shipping",
                         product_images=[image_url] if image_url else [],
-                        rating=round(random.uniform(3.8, 4.6), 1),
-                        review_count=random.randint(5, 200),
+                        rating=0.0,
+                        review_count=0,
                         source_site='eBay',
                         source_url=product_url,
                         product_id=f"ebay_{keyword}_{i+1}",
                         scraped_at=datetime.now().isoformat(),
                         seller_name="eBay Seller",
                         stock_status="In Stock",
-                        current_stock=random.randint(5, 75)
+                        current_stock=0
                     )
                     
                     # Add variants if available
@@ -1498,44 +1522,10 @@ class UniversalScraper:
         return None
     
     def ensure_valid_price(self, price, title, site):
-        """Ensure price is valid and reasonable - generate reasonable price if missing"""
-        # If we have a valid price, return it
-        if price and price > 0 and price <= 10000:
+        """Return only real prices; if invalid, signal missing by returning 0 or None."""
+        if price and price > 0 and price <= 1000000:
             return round(price, 2)
-        
-        # Generate reasonable price based on product type and site
-        product_lower = title.lower()
-        
-        # High-end electronics
-        if any(word in product_lower for word in ['iphone', 'macbook', 'laptop', 'computer', 'gaming']):
-            return round(random.uniform(200, 1500), 2)
-        # Mid-range electronics
-        elif any(word in product_lower for word in ['phone', 'tablet', 'camera', 'smartphone']):
-            return round(random.uniform(50, 800), 2)
-        # Audio equipment
-        elif any(word in product_lower for word in ['headphone', 'speaker', 'audio', 'earphone', 'bluetooth']):
-            return round(random.uniform(20, 300), 2)
-        # Clothing and fashion
-        elif any(word in product_lower for word in ['shirt', 'shoes', 'clothing', 'dress', 'jacket', 'pants']):
-            return round(random.uniform(15, 150), 2)
-        # Books and toys
-        elif any(word in product_lower for word in ['book', 'toy', 'game', 'puzzle']):
-            return round(random.uniform(5, 60), 2)
-        # Home and kitchen
-        elif any(word in product_lower for word in ['kitchen', 'home', 'furniture', 'appliance']):
-            return round(random.uniform(30, 500), 2)
-        # Beauty and personal care
-        elif any(word in product_lower for word in ['beauty', 'cosmetic', 'skincare', 'makeup']):
-            return round(random.uniform(10, 100), 2)
-        # Site-specific pricing
-        elif site.lower() == 'daraz':
-            return round(random.uniform(500, 5000), 2)  # PKR
-        elif site.lower() == 'amazon':
-            return round(random.uniform(10, 200), 2)  # USD
-        elif site.lower() == 'ebay':
-            return round(random.uniform(5, 150), 2)  # USD
-        else:
-            return round(random.uniform(10, 100), 2)  # Default reasonable price
+        return 0
     
     def extract_variants(self, soup, product_name):
         """Extract product variants from page - Enhanced for real e-commerce sites"""
@@ -1543,43 +1533,139 @@ class UniversalScraper:
         try:
             logger.info(f"Extracting variants for: {product_name[:50]}...")
             
-            # ENHANCED VARIANT EXTRACTION FOR AMAZON
-            # Look for Amazon-specific variant selectors
+            # ENHANCED VARIANT EXTRACTION (PRODUCT PAGE ONLY)
+            if soup is None:
+                logger.info("No product page soup available for variants")
+                return []
+
+            # 1) AMAZON: Parse embedded JSON (more accurate) for color/size
+            try:
+                scripts = soup.find_all('script')
+                color_names = []
+                size_names = []
+                json_found = False
+                for sc in scripts:
+                    txt = sc.get_text(' ', strip=False)
+                    if not txt or 'colorToAsin' not in txt:
+                        continue
+                    json_found = True
+                    # Try to extract the JSON inside parseJSON('...') or direct JSON
+                    import re, json
+                    m = re.search(r"parseJSON\('\s*(\{.*?\})\s*'\)", txt, re.DOTALL)
+                    raw = None
+                    if m:
+                        raw = m.group(1)
+                        raw = raw.encode('utf-8').decode('unicode_escape')
+                    else:
+                        # Fallback: attempt to capture a JS object containing colorToAsin
+                        m2 = re.search(r"\{[^{}]*\"colorToAsin\"[\s\S]*?\}", txt)
+                        if m2:
+                            raw = m2.group(0)
+                    if not raw:
+                        continue
+                    try:
+                        data = json.loads(raw)
+                    except Exception:
+                        # Try to clean quotes
+                        cleaned = raw.replace('\"', '"').replace("\\'", "'")
+                        data = json.loads(cleaned)
+                    color_map = data.get('colorToAsin') or {}
+                    if isinstance(color_map, dict):
+                        color_names = list(color_map.keys())
+                    # Try to detect available dimensions for sizes
+                    visual_dims = data.get('visualDimensions') or []
+                    # If a size dropdown exists, collect from DOM below (handled later)
+                    break
+                # From DOM size dropdowns
+                size_select = soup.select('select#native_dropdown_selected_size_name option:not([value=""])')
+                if not size_select:
+                    size_select = soup.select('#variation_size_name select option:not([value=""])')
+                for opt in size_select:
+                    t = (opt.get('value') or opt.get_text(strip=True) or '').strip()
+                    if t and t.lower() not in ['select', 'please select']:
+                        size_names.append(t)
+                # De-duplicate
+                color_names = list(dict.fromkeys([c for c in color_names if c]))
+                size_names = list(dict.fromkeys([s for s in size_names if s]))
+                if color_names or size_names:
+                    if color_names and size_names:
+                        for c in color_names[:15]:
+                            for s in size_names[:15]:
+                                variants.append({
+                                    'color': c,
+                                    'size': s,
+                                    'price': None,
+                                    'stock': None,
+                                    'sku': f"COLOR-{c.replace(' ', '')}_SIZE-{s.replace(' ', '')}",
+                                    'images': []
+                                })
+                    elif color_names:
+                        for c in color_names[:20]:
+                            variants.append({
+                                'color': c,
+                                'price': None,
+                                'stock': None,
+                                'sku': f"COLOR-{c.replace(' ', '')}",
+                                'images': []
+                            })
+                    elif size_names:
+                        for s in size_names[:20]:
+                            variants.append({
+                                'size': s,
+                                'price': None,
+                                'stock': None,
+                                'sku': f"SIZE-{s.replace(' ', '')}",
+                                'images': []
+                            })
+                    # If we successfully built variants, return early for Amazon
+                    if variants:
+                        logger.info(f"Amazon JSON-based variants extracted: {len(variants)}")
+                        return variants[:40]
+            except Exception as e:
+                logger.debug(f"Amazon JSON variant parse failed: {e}")
+
+            # Prefer twister/variation blocks on Amazon product pages
             amazon_selectors = [
-                # Size variants
+                '#twister [data-asin-variation] .a-button-text',
+                '#twister .swatchAvailable .a-button-text',
+                '#twister .a-button-toggle .a-button-text',
+                '#variation_color_name .a-button-text',
+                '#variation_size_name .a-button-text',
+                'select#native_dropdown_selected_size_name option:not([value=""])',
                 'select[name*="size"] option:not([value=""])',
-                'select[name*="Size"] option:not([value=""])',
-                '.a-button-inner .a-button-text',
-                '.a-button-dropdown .a-button-text',
-                '[data-action="a-dropdown-button"] .a-button-text',
-                
-                # Color variants
                 'select[name*="color"] option:not([value=""])',
-                'select[name*="Color"] option:not([value=""])',
-                '.a-button-selected .a-button-text',
-                '.a-button-toggle .a-button-text',
-                
-                # Storage/Memory variants
-                'select[name*="storage"] option:not([value=""])',
-                'select[name*="memory"] option:not([value=""])',
-                'select[name*="capacity"] option:not([value=""])',
-                
-                # Generic variant options
-                'select[name*="variant"] option:not([value=""])',
-                'select[name*="option"] option:not([value=""])',
-                'input[name*="variant"][type="radio"]',
-                'input[name*="option"][type="radio"]',
+                'input[type="radio"][name*="color"] + label',
+                'input[type="radio"][name*="size"] + label'
+            ]
+
+            # eBay product page selectors (latest common layouts)
+            ebay_selectors = [
+                '#x-msku .select-menu option:not([value=""])',
+                '#msku-sel-1 option:not([value=""])',
+                '#msku-sel-2 option:not([value=""])',
+                '[data-testid="x-variation-select"] option:not([value=""])',
+                '[data-testid="x-variation-select"] .x-variation-select__value',
+                '[data-testid="ux-textspans-ITEM_VARIATIONS"] span',
+                '.x-variation-select .x-variation-select__menu .x-variation-select__option',
+                'select[name*="Size"] option:not([value=""])',
+                'select[name*="Color"] option:not([value=""])'
             ]
             
             all_variants = []
-            for selector in amazon_selectors:
+            # Try Amazon then eBay selectors; this is harmless across sites due to low overlap
+            for selector in amazon_selectors + ebay_selectors:
                 elements = soup.select(selector)
                 for elem in elements:
-                    variant_text = elem.get_text(strip=True) or elem.get('value', '')
-                    if variant_text and len(variant_text) > 1 and len(variant_text) < 50:
-                        # Skip generic options
-                        if variant_text.lower() not in ['select', 'choose', 'please select', 'size', 'color', 'option']:
-                            all_variants.append(variant_text)
+                    variant_text = (elem.get('value') or elem.get_text(strip=True) or '').strip()
+                    if not variant_text:
+                        continue
+                    vt = variant_text.lower()
+                    # Denylist generic UI texts often seen on Amazon pages
+                    deny = ['select', 'choose', 'please select', 'size', 'color', 'option', 'go', 'see options', 'add to cart', 'sort by']
+                    if any(d in vt for d in deny):
+                        continue
+                    if 1 < len(variant_text) < 50:
+                        all_variants.append(variant_text)
             
             # Remove duplicates and filter
             unique_variants = list(dict.fromkeys(all_variants))
@@ -2149,15 +2235,15 @@ class UniversalScraper:
                                 product_description=f"High quality {title} from Daraz Pakistan with fast delivery and COD available",
                                 meta_tags_description=f"Buy {title} online in Pakistan with free delivery from Daraz",
                                 product_images=[image_url] if image_url else [],
-                                rating=round(random.uniform(3.8, 4.6), 1),
-                                review_count=random.randint(5, 150),
+                                rating=0.0,
+                                review_count=0,
                                 source_site='Daraz',
                                 source_url=product_url,
                                 product_id=f"daraz_{keyword}_{i+1}",
                                 scraped_at=datetime.now().isoformat(),
                                 seller_name="Daraz Pakistan",
                                 stock_status="In Stock",
-                                current_stock=random.randint(3, 50),
+                                current_stock=0,
                                 variants=variants
                             )
                             
@@ -2281,15 +2367,15 @@ class UniversalScraper:
                         product_description=f"Quality {title} from AliExpress with worldwide shipping",
                         meta_tags_description=f"Buy {title} from AliExpress at wholesale prices",
                         product_images=[image_url] if image_url else [],
-                        rating=round(random.uniform(3.8, 4.6), 1),
-                        review_count=random.randint(10, 300),
+                        rating=0.0,
+                        review_count=0,
                         source_site='AliExpress',
                         source_url=product_url,
                         product_id=f"ali_{keyword}_{i+1}",
                         scraped_at=datetime.now().isoformat(),
                         seller_name="AliExpress Seller",
                         stock_status="In Stock",
-                        current_stock=random.randint(5, 100)
+                        current_stock=0
                     )
                     
                     # Add variants if available
@@ -2409,15 +2495,15 @@ class UniversalScraper:
                         product_description=f"Handmade {title} from Etsy artisan with unique craftsmanship",
                         meta_tags_description=f"Buy handmade {title} from Etsy marketplace",
                         product_images=[image_url] if image_url else [],
-                        rating=round(random.uniform(4.2, 4.9), 1),
-                        review_count=random.randint(10, 200),
+                        rating=0.0,
+                        review_count=0,
                         source_site='Etsy',
                         source_url=product_url,
                         product_id=f"etsy_{keyword}_{i+1}",
                         scraped_at=datetime.now().isoformat(),
                         seller_name="Etsy Marketplace",
                         stock_status="In Stock",
-                        current_stock=random.randint(1, 20)
+                        current_stock=0
                     )
                     
                     # Add variants if available
@@ -2554,15 +2640,15 @@ class UniversalScraper:
                         product_description=f"Premium quality {title} from ValueBox Pakistan with nationwide delivery",
                         meta_tags_description=f"Buy {title} from ValueBox Pakistan at best prices",
                         product_images=[image_url] if image_url else [],
-                        rating=round(random.uniform(3.8, 4.6), 1),
-                        review_count=random.randint(5, 100),
+                        rating=0.0,
+                        review_count=0,
                         source_site='ValueBox',
                         source_url=product_url,
                         product_id=f"valuebox_{keyword}_{i+1}",
                         scraped_at=datetime.now().isoformat(),
                         seller_name="ValueBox Pakistan",
                         stock_status="In Stock",
-                        current_stock=random.randint(3, 50)
+                        current_stock=0
                     )
                     
                     # Add variants if available
