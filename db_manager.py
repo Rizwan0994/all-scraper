@@ -182,7 +182,7 @@ class DatabaseManager:
             # Map scraped data to database fields
             insert_query = """
             INSERT INTO products (
-                name, source_url, slug, unit, min_purchase_qty, max_purchase_qty,
+                name, slug, unit, min_purchase_qty, max_purchase_qty,
                 meta_title, price, sku, current_stock, discount, delivery_time,
                 weight, height, length, width, product_description, meta_description,
                 order_count, product_reviews, disocunt_type, child_category, stock,
@@ -192,7 +192,7 @@ class DatabaseManager:
             ) VALUES (
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s
+                %s, %s, %s
             )
             """
             
@@ -206,7 +206,6 @@ class DatabaseManager:
             
             values = (
                 product.get('product_name', '')[:255],  # name
-                product.get('source_url', ''),  # source_url
                 slug,  # slug
                 '1',  # unit
                 '1',  # min_purchase_qty
@@ -288,12 +287,20 @@ class DatabaseManager:
             logger.error(f"Error inserting product attributes: {e}")
     
     def _insert_product_variations(self, cursor, product_id, product):
-        """Insert product variations"""
+        """Insert product variations - EVERY product MUST have at least one variant"""
         try:
             variants = product.get('variants', [])
             
+            # REAL-WORLD E-COMMERCE RULE: Every product must have at least one variant
             if not variants:
-                # Insert single variation for products without variants
+                # Create default variant with main product details
+                logger.info(f"Product has no variants, creating default variant for product_id: {product_id}")
+                
+                # Generate default SKU if none exists
+                default_sku = product.get('sku', f"DEFAULT-{product_id}")
+                if not default_sku:
+                    default_sku = f"DEFAULT-{product_id}"
+                
                 insert_query = """
                 INSERT INTO product_variations (
                     product_id, sku, purchase_price, unit_price, current_stock,
@@ -303,7 +310,7 @@ class DatabaseManager:
                 """
                 values = (
                     product_id,
-                    product.get('sku', ''),
+                    default_sku,
                     product.get('purchase_price', 0),
                     product.get('unit_price', 0),
                     product.get('current_stock', 0),
@@ -313,12 +320,25 @@ class DatabaseManager:
                     datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                     product.get('discount', 0),
                     '12',  # discount_type
-                    'single_combination',
+                    'default_combination',  # Changed from 'single_combination'
                     '1'  # stock_status
                 )
                 cursor.execute(insert_query, values)
                 variation_id = cursor.lastrowid
-                logger.info(f"Inserted single variation with ID: {variation_id}")
+                logger.info(f"Created DEFAULT variant with ID: {variation_id} for product_id: {product_id}")
+                
+                # Insert additional images as variant images for the default variant
+                main_images = product.get('product_images', [])
+                if len(main_images) > 1:
+                    # Additional images go to the default variant
+                    for img_url in main_images[1:]:
+                        if img_url and img_url.strip():
+                            self._insert_variant_image(cursor, variation_id, img_url, product)
+                else:
+                    # If no additional images, use main image for the default variant
+                    if main_images and main_images[0]:
+                        self._insert_variant_image(cursor, variation_id, main_images[0], product)
+                
             else:
                 # Insert each variant
                 for variant in variants:
@@ -348,10 +368,16 @@ class DatabaseManager:
                     variation_id = cursor.lastrowid
                     logger.info(f"Inserted variation with ID: {variation_id}")
                     
-                    # Insert variant-specific images if they exist
+                    # Insert variant-specific images if they exist, otherwise use main product image
                     variant_images = variant.get('images', [])
                     if variant_images:
                         self._insert_variant_images(cursor, variation_id, variant_images, product)
+                    else:
+                        # If variant has no images, use main product image as fallback
+                        main_images = product.get('product_images', [])
+                        if main_images and main_images[0]:
+                            logger.info(f"Variant has no images, using main product image as fallback")
+                            self._insert_variant_image(cursor, variation_id, main_images[0], product)
                     
         except Exception as e:
             logger.error(f"Error inserting product variations: {e}")
@@ -363,36 +389,42 @@ class DatabaseManager:
             
             for i, image_url in enumerate(variant_images):
                 if image_url and image_url.strip():
-                    insert_query = """
-                    INSERT INTO images (
-                        url, imageable_id, imageable_type, type, created_by, updated_by,
-                        created_at, updated_at, alt
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """
-                    
-                    # Generate alt text from product name and variant info
-                    alt_text = f"{product.get('product_name', 'Product')} - Variant Image {i+1}"
-                    
-                    values = (
-                        image_url.strip(),  # url
-                        variation_id,  # imageable_id (variation ID)
-                        'App\\Models\\ProductVariation',  # imageable_type
-                        'product_variation',  # type
-                        None,  # created_by
-                        None,  # updated_by
-                        datetime.now().strftime('%Y-%m-%d %H:%M:%S'),  # created_at
-                        datetime.now().strftime('%Y-%m-%d %H:%M:%S'),  # updated_at
-                        alt_text  # alt
-                    )
-                    
-                    cursor.execute(insert_query, values)
-                    image_id = cursor.lastrowid
-                    logger.info(f"Inserted variant image {i+1} with ID {image_id}: {image_url[:50]}...")
-                else:
-                    logger.warning(f"Skipping empty variant image URL at index {i}")
+                    self._insert_variant_image(cursor, variation_id, image_url, product, i+1)
                     
         except Exception as e:
             logger.error(f"Error inserting variant images: {e}")
+    
+    def _insert_variant_image(self, cursor, variation_id, image_url, product, image_index=1):
+        """Insert single variant image"""
+        try:
+            insert_query = """
+            INSERT INTO images (
+                url, imageable_id, imageable_type, type, created_by, updated_by,
+                created_at, updated_at, alt
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """
+            
+            # Generate alt text from product name and variant info
+            alt_text = f"{product.get('product_name', 'Product')} - Variant Image {image_index}"
+            
+            values = (
+                image_url.strip(),  # url
+                variation_id,  # imageable_id (variation ID)
+                'App\\Models\\ProductVariation',  # imageable_type
+                'product_variation',  # type
+                None,  # created_by
+                None,  # updated_by
+                datetime.now().strftime('%Y-%m-%d %H:%M:%S'),  # created_at
+                datetime.now().strftime('%Y-%m-%d %H:%M:%S'),  # updated_at
+                alt_text  # alt
+            )
+            
+            cursor.execute(insert_query, values)
+            image_id = cursor.lastrowid
+            logger.info(f"Inserted variant image {image_index} with ID {image_id}: {image_url[:50]}...")
+            
+        except Exception as e:
+            logger.error(f"Error inserting variant image: {e}")
     
     def _insert_product_images(self, cursor, product_id, product):
         """Insert product images into images table"""
@@ -418,9 +450,10 @@ class DatabaseManager:
             
             logger.info(f"Found {len(all_images)} images for product ID: {product_id}")
             
-            # Insert each image
-            for i, image_url in enumerate(all_images):
-                if image_url and image_url.strip():  # Check if URL is not empty
+            # Insert only the first image as thumbnail
+            if all_images and all_images[0]:
+                image_url = all_images[0].strip()
+                if image_url:
                     insert_query = """
                     INSERT INTO images (
                         url, imageable_id, imageable_type, type, created_by, updated_by,
@@ -428,20 +461,14 @@ class DatabaseManager:
                     ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """
                     
-                    # Determine image type: first image = thumbnail, others = product
-                    if i == 0:
-                        image_type = "thumbnail"  # First image is thumbnail
-                    else:
-                        image_type = "product"   # Additional images are product type
-                    
-                    # Generate alt text from product name
-                    alt_text = f"{product.get('product_name', 'Product')} - {image_type.title()} Image {i+1}"
+                    # Only insert thumbnail (first image)
+                    alt_text = f"{product.get('product_name', 'Product')} - Thumbnail"
                     
                     values = (
-                        image_url.strip(),  # url
+                        image_url,  # url
                         product_id,  # imageable_id
                         'App\\Models\\Product',  # imageable_type
-                        image_type,  # type
+                        'thumbnail',  # type
                         None,  # created_by
                         None,  # updated_by
                         datetime.now().strftime('%Y-%m-%d %H:%M:%S'),  # created_at
@@ -449,12 +476,12 @@ class DatabaseManager:
                         alt_text  # alt
                     )
                     
-                    logger.info(f"Executing image insert query with values: {values[:3]}...")
+                    logger.info(f"Inserting thumbnail image for product ID: {product_id}")
                     cursor.execute(insert_query, values)
                     image_id = cursor.lastrowid
-                    logger.info(f"Inserted {image_type} image {i+1} with ID {image_id}: {image_url[:50]}...")
-                else:
-                    logger.warning(f"Skipping empty image URL at index {i}")
+                    logger.info(f"Inserted thumbnail image with ID {image_id}: {image_url[:50]}...")
+                    
+                    logger.info(f"Additional images ({len(all_images)-1}) will be handled by variants")
             
             logger.info(f"Successfully inserted {len(all_images)} images for product ID: {product_id}")
             
@@ -469,23 +496,35 @@ class DatabaseManager:
             logger.error(f"Product ID: {product_id}, Product: {product.get('product_name', 'Unknown')}")
     
     def _check_product_exists(self, cursor, product):
-        """Check if product already exists based on source URL"""
+        """Check if product already exists based on product name and SKU"""
         try:
-            source_url = product.get('source_url', '')
-            if not source_url:
-                logger.warning("Product has no source URL, cannot check for duplicates")
+            product_name = product.get('product_name', '')
+            sku = product.get('sku', '')
+            
+            if not product_name and not sku:
+                logger.warning("Product has no name or SKU, cannot check for duplicates")
                 return None
             
-            check_query = "SELECT id FROM products WHERE source_url = %s"
-            cursor.execute(check_query, (source_url,))
-            result = cursor.fetchone()
+            # Check by SKU first (most reliable), then by name
+            if sku:
+                check_query = "SELECT id FROM products WHERE sku = %s"
+                cursor.execute(check_query, (sku,))
+                result = cursor.fetchone()
+                if result:
+                    logger.info(f"Product with SKU already exists: {sku}")
+                    return result[0]
             
-            if result:
-                logger.info(f"Product with source URL already exists: {source_url[:50]}...")
-                return result[0]
-            else:
-                logger.info(f"Product with source URL is new: {source_url[:50]}...")
-                return None
+            # Check by name if SKU check failed
+            if product_name:
+                check_query = "SELECT id FROM products WHERE name = %s"
+                cursor.execute(check_query, (product_name,))
+                result = cursor.fetchone()
+                if result:
+                    logger.info(f"Product with name already exists: {product_name[:50]}...")
+                    return result[0]
+            
+            logger.info(f"Product is new: {product_name[:50]}...")
+            return None
                 
         except Exception as e:
             logger.error(f"Error checking if product exists: {e}")

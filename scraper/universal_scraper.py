@@ -485,7 +485,9 @@ class UniversalScraper:
                     # Get additional images by visiting product page
                     additional_images = []
                     if product_url and main_image_url:
+                        logger.info(f"Attempting to scrape additional images from: {product_url[:50]}...")
                         additional_images = self.scrape_product_images(product_url, site='amazon')
+                        logger.info(f"Found {len(additional_images)} additional images")
                     
                     # Combine main image with additional images
                     all_images = [main_image_url] + additional_images if main_image_url else additional_images
@@ -509,11 +511,27 @@ class UniversalScraper:
                     # Extract variants if available
                     variants = self.extract_variants(soup, title)
                     
+                    # REALISTIC VARIANT-IMAGE MAPPING
+                    additional_images = all_images[1:] if len(all_images) > 1 else []
+                    if variants:
+                        logger.info(f"Mapping {len(additional_images)} additional images to {len(variants)} variants realistically")
+                        
+                        # Extract variant-specific images from the product page
+                        variant_specific_images = self._extract_variant_images(soup, title)
+                        
+                        if variant_specific_images:
+                            logger.info(f"Found {len(variant_specific_images)} variant-specific images")
+                            self._map_variant_images_realistically(variants, variant_specific_images, main_image_url)
+                        else:
+                            # Fallback: Intelligent image distribution based on variant type
+                            logger.info("No variant-specific images found, using intelligent fallback")
+                            self._map_variant_images_fallback(variants, additional_images, main_image_url)
+                    
                     # Create the product
                     product = Product(
                         product_name=title,
                         original_title=title,
-                        product_type="Single Product",
+                        product_type="Variant" if variants else "Single Product",
                         unit_price=price,
                         purchase_price=round(price * 0.8, 2),
                         sku=sku,
@@ -522,7 +540,7 @@ class UniversalScraper:
                         product_description=f"Quality {title} from Amazon with fast shipping and customer support",
                         meta_tags_description=f"Buy {title} from Amazon at competitive prices",
                         product_images=all_images[:1] if all_images else [],  # First image as main
-                        additional_images=all_images[1:] if len(all_images) > 1 else [],  # Rest as additional
+                        additional_images=[],  # Additional images now go to variants
                         rating=rating,
                         review_count=review_count,
                         source_site='Amazon',
@@ -531,12 +549,9 @@ class UniversalScraper:
                         scraped_at=datetime.now().isoformat(),
                         seller_name="Amazon",
                         stock_status="In Stock",
-                        current_stock=random.randint(10, 100)
+                        current_stock=random.randint(10, 100),
+                        variants=variants
                     )
-                    
-                    # Add variants if available
-                    if variants:
-                        product.variants = variants
                     
                     if self.add_product(product):
                         products_added += 1
@@ -603,17 +618,38 @@ class UniversalScraper:
             return []
     
     def _extract_amazon_images(self, soup):
-        """Extract images from Amazon product page"""
+        """Extract images from Amazon product page with enhanced selectors"""
         images = []
         
-        # Amazon image gallery selectors
+        # Enhanced Amazon image gallery selectors for 2024
         selectors = [
-            '#altImages img',  # Main image gallery
-            '#landingImage',   # Main product image
-            '.a-dynamic-image', # Dynamic images
-            '#imgTagWrapperId img', # Image wrapper
-            '.a-button-selected img', # Selected variant images
-            '[data-old-hires]', # High resolution images
+            # Main image gallery
+            '#altImages img',
+            '#landingImage',
+            '.a-dynamic-image',
+            '#imgTagWrapperId img',
+            '.a-button-selected img',
+            '[data-old-hires]',
+            
+            # Additional selectors for different Amazon layouts
+            '.imageThumbnail img',
+            '.a-carousel-item img',
+            '.a-button-toggle img',
+            '.a-button-text img',
+            '[data-action="main-image-click"] img',
+            '.a-spacing-small img',
+            '.a-spacing-base img',
+            
+            # Generic image selectors
+            'img[src*="media-amazon.com"]',
+            'img[data-src*="media-amazon.com"]',
+            'img[src*="amazon.com"]',
+            'img[data-src*="amazon.com"]',
+            
+            # Product-specific selectors
+            '[data-testid="product-image"] img',
+            '.product-image img',
+            '.gallery-image img',
         ]
         
         for selector in selectors:
@@ -623,16 +659,36 @@ class UniversalScraper:
                 img_url = (elem.get('data-old-hires') or 
                           elem.get('data-src') or 
                           elem.get('src') or 
-                          elem.get('data-a-dynamic-image'))
+                          elem.get('data-a-dynamic-image') or
+                          elem.get('data-lazy') or
+                          elem.get('data-original'))
                 
-                if img_url and 'http' in img_url:
+                if img_url and ('http' in img_url or img_url.startswith('//')):
                     # Clean Amazon image URL to get high resolution
                     if '._AC_' in img_url:
-                        # Remove size restrictions
+                        # Remove size restrictions for better quality
                         img_url = re.sub(r'\._AC_[^_]+_', '._AC_SL1500_', img_url)
-                    images.append(img_url)
+                    
+                    # Ensure HTTPS
+                    if img_url.startswith('//'):
+                        img_url = 'https:' + img_url
+                    
+                    # Only add Amazon images
+                    if 'amazon.com' in img_url or 'media-amazon.com' in img_url:
+                        images.append(img_url)
         
-        return list(dict.fromkeys(images))  # Remove duplicates
+        # Remove duplicates and filter out very small images
+        unique_images = []
+        seen_urls = set()
+        for img_url in images:
+            # Skip very small images (likely icons)
+            if any(size in img_url for size in ['_AC_UY10_', '_AC_UY15_', '_AC_UY20_']):
+                continue
+            if img_url not in seen_urls:
+                unique_images.append(img_url)
+                seen_urls.add(img_url)
+        
+        return unique_images
     
     def _extract_ebay_images(self, soup):
         """Extract images from eBay product page"""
@@ -1482,97 +1538,374 @@ class UniversalScraper:
             return round(random.uniform(10, 100), 2)  # Default reasonable price
     
     def extract_variants(self, soup, product_name):
-        """Extract product variants from page"""
+        """Extract product variants from page - Enhanced for real e-commerce sites"""
         variants = []
         try:
-            # Look for size options
-            size_selectors = [
-                'select[name*="size"] option',
-                'input[name*="size"]',
-                '.size-option',
-                '[data-size]'
+            logger.info(f"Extracting variants for: {product_name[:50]}...")
+            
+            # ENHANCED VARIANT EXTRACTION FOR AMAZON
+            # Look for Amazon-specific variant selectors
+            amazon_selectors = [
+                # Size variants
+                'select[name*="size"] option:not([value=""])',
+                'select[name*="Size"] option:not([value=""])',
+                '.a-button-inner .a-button-text',
+                '.a-button-dropdown .a-button-text',
+                '[data-action="a-dropdown-button"] .a-button-text',
+                
+                # Color variants
+                'select[name*="color"] option:not([value=""])',
+                'select[name*="Color"] option:not([value=""])',
+                '.a-button-selected .a-button-text',
+                '.a-button-toggle .a-button-text',
+                
+                # Storage/Memory variants
+                'select[name*="storage"] option:not([value=""])',
+                'select[name*="memory"] option:not([value=""])',
+                'select[name*="capacity"] option:not([value=""])',
+                
+                # Generic variant options
+                'select[name*="variant"] option:not([value=""])',
+                'select[name*="option"] option:not([value=""])',
+                'input[name*="variant"][type="radio"]',
+                'input[name*="option"][type="radio"]',
             ]
             
-            sizes = []
-            for selector in size_selectors:
+            all_variants = []
+            for selector in amazon_selectors:
                 elements = soup.select(selector)
                 for elem in elements:
-                    size_text = elem.get_text(strip=True) or elem.get('value', '')
-                    if size_text and len(size_text) < 20:
-                        sizes.append(size_text)
+                    variant_text = elem.get_text(strip=True) or elem.get('value', '')
+                    if variant_text and len(variant_text) > 1 and len(variant_text) < 50:
+                        # Skip generic options
+                        if variant_text.lower() not in ['select', 'choose', 'please select', 'size', 'color', 'option']:
+                            all_variants.append(variant_text)
             
-            # Look for color options
-            color_selectors = [
-                'select[name*="color"] option',
-                'input[name*="color"]',
-                '.color-option',
-                '[data-color]'
-            ]
+            # Remove duplicates and filter
+            unique_variants = list(dict.fromkeys(all_variants))
+            logger.info(f"Found {len(unique_variants)} potential variants: {unique_variants[:5]}")
             
-            colors = []
-            for selector in color_selectors:
-                elements = soup.select(selector)
-                for elem in elements:
-                    color_text = elem.get_text(strip=True) or elem.get('value', '')
-                    if color_text and len(color_text) < 20:
-                        colors.append(color_text)
+            # Generate realistic variants based on product type and found options
+            base_price = random.uniform(29, 599)  # More realistic price range
             
-            # Generate variants
-            base_price = random.uniform(29, 199)
-            
-            if sizes and colors:
-                # Both sizes and colors
-                for size in sizes[:3]:
-                    for color in colors[:3]:
+            # ELECTRONICS - Most common variants
+            if any(word in product_name.lower() for word in ['phone', 'tablet', 'laptop', 'computer', 'gaming', 'console', 'xbox', 'playstation']):
+                # Electronics typically have storage/memory variants
+                storage_options = ['64GB', '128GB', '256GB', '512GB', '1TB']
+                color_options = ['Black', 'White', 'Silver', 'Space Gray', 'Blue']
+                
+                # Use found variants or defaults
+                if unique_variants:
+                    # Use real variants found on page
+                    for variant in unique_variants[:4]:
+                        if any(storage in variant for storage in ['GB', 'TB']):
+                            variants.append({
+                                'storage': variant,
+                                'price': round(base_price * random.uniform(0.95, 1.3), 2),
+                                'stock': random.randint(5, 25),
+                                'sku': f"STORAGE-{variant.replace(' ', '')}",
+                                'images': []
+                            })
+                        elif any(color in variant.lower() for color in ['black', 'white', 'blue', 'red', 'gray', 'silver']):
+                            variants.append({
+                                'color': variant,
+                                'price': round(base_price * random.uniform(0.98, 1.1), 2),
+                                'stock': random.randint(8, 30),
+                                'sku': f"COLOR-{variant.replace(' ', '')}",
+                                'images': []
+                            })
+                        else:
+                            variants.append({
+                                'variant': variant,
+                                'price': round(base_price * random.uniform(0.95, 1.15), 2),
+                                'stock': random.randint(5, 20),
+                                'sku': f"VAR-{variant.replace(' ', '')}",
+                                'images': []
+                            })
+                else:
+                    # Create default storage variants for electronics
+                    for storage in storage_options[:3]:
                         variants.append({
-                            'size': size,
-                            'color': color,
-                            'price': round(base_price * random.uniform(0.9, 1.2), 2),
-                            'stock': random.randint(0, 50),
-                            'sku': f"{size.replace(' ', '')}-{color.replace(' ', '')}"
+                            'storage': storage,
+                            'price': round(base_price * (1 + len(storage)/200), 2),
+                            'stock': random.randint(5, 25),
+                            'sku': f"STORAGE-{storage}",
+                            'images': []
                         })
-            elif sizes:
-                # Only sizes
-                for size in sizes[:5]:
-                    variants.append({
-                        'size': size,
-                        'price': round(base_price * random.uniform(0.95, 1.15), 2),
-                        'stock': random.randint(5, 30),
-                        'sku': f"SIZE-{size.replace(' ', '')}"
-                    })
-            elif colors:
-                # Only colors
-                for color in colors[:5]:
-                    variants.append({
-                        'color': color,
-                        'price': round(base_price * random.uniform(0.95, 1.15), 2),
-                        'stock': random.randint(5, 30),
-                        'sku': f"COLOR-{color.replace(' ', '')}"
-                    })
             
-            # If no variants found, create some common ones based on product type
-            if not variants:
-                if any(word in product_name.lower() for word in ['shirt', 'dress', 'clothing', 'jacket']):
-                    for size in ['S', 'M', 'L', 'XL']:
+            # CLOTHING - Size and color variants
+            elif any(word in product_name.lower() for word in ['shirt', 'dress', 'clothing', 'jacket', 'pants', 'jeans', 'shoes']):
+                size_options = ['S', 'M', 'L', 'XL', 'XXL']
+                color_options = ['Black', 'White', 'Blue', 'Red', 'Gray', 'Navy']
+                
+                if unique_variants:
+                    for variant in unique_variants[:4]:
+                        if variant.upper() in ['S', 'M', 'L', 'XL', 'XXL'] or any(size in variant for size in size_options):
+                            variants.append({
+                                'size': variant,
+                                'price': round(base_price * random.uniform(0.95, 1.05), 2),
+                                'stock': random.randint(10, 40),
+                                'sku': f"SIZE-{variant}",
+                                'images': []
+                            })
+                        else:
+                            variants.append({
+                                'color': variant,
+                                'price': round(base_price * random.uniform(0.98, 1.08), 2),
+                                'stock': random.randint(8, 35),
+                                'sku': f"COLOR-{variant.replace(' ', '')}",
+                                'images': []
+                            })
+                else:
+                    for size in size_options[:3]:
                         variants.append({
                             'size': size,
                             'price': round(base_price * random.uniform(0.95, 1.1), 2),
                             'stock': random.randint(10, 40),
-                            'sku': f"SIZE-{size}"
-                        })
-                elif any(word in product_name.lower() for word in ['phone', 'tablet', 'laptop']):
-                    for storage in ['64GB', '128GB', '256GB']:
-                        variants.append({
-                            'storage': storage,
-                            'price': round(base_price * (1 + len(storage)/100), 2),
-                            'stock': random.randint(5, 25),
-                            'sku': f"STORAGE-{storage}"
+                            'sku': f"SIZE-{size}",
+                            'images': []
                         })
             
+            # HOME & KITCHEN - Capacity/size variants
+            elif any(word in product_name.lower() for word in ['kitchen', 'home', 'appliance', 'tool', 'bottle', 'cup']):
+                capacity_options = ['Small', 'Medium', 'Large', '500ml', '1L', '2L']
+                
+                if unique_variants:
+                    for variant in unique_variants[:3]:
+                        variants.append({
+                            'capacity': variant,
+                            'price': round(base_price * random.uniform(0.9, 1.2), 2),
+                            'stock': random.randint(5, 20),
+                            'sku': f"CAP-{variant.replace(' ', '')}",
+                            'images': []
+                        })
+                else:
+                    for capacity in capacity_options[:2]:
+                        variants.append({
+                            'capacity': capacity,
+                            'price': round(base_price * random.uniform(0.9, 1.15), 2),
+                            'stock': random.randint(5, 20),
+                            'sku': f"CAP-{capacity}",
+                            'images': []
+                        })
+            
+            # DEFAULT - Create generic variants for any other product
+            else:
+                if unique_variants:
+                    for variant in unique_variants[:3]:
+                        variants.append({
+                            'option': variant,
+                            'price': round(base_price * random.uniform(0.95, 1.15), 2),
+                            'stock': random.randint(5, 25),
+                            'sku': f"OPT-{variant.replace(' ', '')}",
+                            'images': []
+                        })
+                else:
+                    # Create default variants based on product type
+                    variants.append({
+                        'standard': 'Standard',
+                        'price': base_price,
+                        'stock': random.randint(10, 30),
+                        'sku': 'STD-001',
+                        'images': []
+                    })
+            
+            logger.info(f"Generated {len(variants)} variants for product")
+            
         except Exception as e:
-            logger.debug(f"Error extracting variants: {e}")
+            logger.error(f"Error extracting variants: {e}")
         
-        return variants[:6]  # Limit to 6 variants max
+        return variants[:6]
+
+    def _extract_variant_images(self, soup, product_name):
+        """Extract variant-specific images from product page"""
+        variant_images = []
+        try:
+            # Amazon variant image selectors (real-world patterns)
+            variant_selectors = [
+                # Color variant images
+                '.a-button-selected img[src*="variant"]',
+                '.a-button-toggle img[src*="variant"]',
+                '[data-action="a-dropdown-button"] img',
+                '.a-button-inner img',
+                '.color-palette img',
+                '.swatchImage img',
+                
+                # Size/style variant images
+                '.size-selector img',
+                '.style-selector img',
+                '.variant-selector img',
+                
+                # Generic variant images
+                '.imageThumbnail img',
+                '.variant-image img',
+                '.option-image img',
+                
+                # Alternative selectors
+                'img[alt*="color"]',
+                'img[alt*="variant"]',
+                'img[alt*="option"]',
+                'img[src*="color"]',
+                'img[src*="variant"]'
+            ]
+            
+            for selector in variant_selectors:
+                images = soup.select(selector)
+                for img in images:
+                    src = img.get('src', '')
+                    if src and self._is_valid_variant_image(src):
+                        # Convert to HTTPS and clean URL
+                        if src.startswith('//'):
+                            src = 'https:' + src
+                        elif src.startswith('/'):
+                            src = 'https://www.amazon.com' + src
+                        
+                        variant_images.append(src)
+            
+            # Remove duplicates while preserving order
+            seen = set()
+            unique_images = []
+            for img in variant_images:
+                if img not in seen:
+                    seen.add(img)
+                    unique_images.append(img)
+            
+            logger.info(f"Extracted {len(unique_images)} variant-specific images")
+            
+        except Exception as e:
+            logger.error(f"Error extracting variant images: {e}")
+        
+        return unique_images
+
+    def _is_valid_variant_image(self, url):
+        """Check if image URL is a valid variant image"""
+        if not url or len(url) < 10:
+            return False
+        
+        # Filter out non-variant images
+        invalid_patterns = [
+            'logo', 'icon', 'sprite', 'placeholder', 'loading',
+            'spacer', 'pixel', 'transparent', '1x1', 'blank'
+        ]
+        
+        url_lower = url.lower()
+        for pattern in invalid_patterns:
+            if pattern in url_lower:
+                return False
+        
+        # Must be an image
+        image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp']
+        if not any(ext in url_lower for ext in image_extensions):
+            return False
+        
+        return True
+
+    def _map_variant_images_realistically(self, variants, variant_images, main_image_url):
+        """Map variant-specific images to variants realistically"""
+        try:
+            for i, variant in enumerate(variants):
+                variant_type = self._get_variant_type(variant)
+                
+                if variant_type == 'color' and i < len(variant_images):
+                    # Color variants get specific color images
+                    variant['images'] = [variant_images[i]]
+                    logger.info(f"Color variant '{variant.get('color', 'Unknown')}' gets specific image")
+                elif variant_type == 'size':
+                    # Size variants usually share the same product image
+                    variant['images'] = [main_image_url] if main_image_url else []
+                    logger.info(f"Size variant '{variant.get('size', 'Unknown')}' gets main product image")
+                elif variant_type == 'storage':
+                    # Storage variants might have different packaging
+                    if i < len(variant_images):
+                        variant['images'] = [variant_images[i]]
+                    else:
+                        variant['images'] = [main_image_url] if main_image_url else []
+                    logger.info(f"Storage variant '{variant.get('storage', 'Unknown')}' gets storage-specific image")
+                else:
+                    # Generic variants get available images
+                    if i < len(variant_images):
+                        variant['images'] = [variant_images[i]]
+                    else:
+                        variant['images'] = [main_image_url] if main_image_url else []
+                    logger.info(f"Generic variant gets available image")
+                        
+        except Exception as e:
+            logger.error(f"Error mapping variant images realistically: {e}")
+
+    def _map_variant_images_fallback(self, variants, additional_images, main_image_url):
+        """Intelligent fallback mapping when no variant-specific images found"""
+        try:
+            for i, variant in enumerate(variants):
+                variant_type = self._get_variant_type(variant)
+                
+                if variant_type == 'color':
+                    # Color variants: Try to find color-specific images, fallback to main
+                    color_images = [img for img in additional_images if self._is_color_related_image(img, variant.get('color', ''))]
+                    if color_images:
+                        variant['images'] = [color_images[0]]
+                    else:
+                        variant['images'] = [main_image_url] if main_image_url else []
+                    
+                elif variant_type == 'size':
+                    # Size variants: Use main product image (sizes usually look the same)
+                    variant['images'] = [main_image_url] if main_image_url else []
+                    
+                elif variant_type == 'storage':
+                    # Storage variants: Use main image or first additional image
+                    if additional_images:
+                        variant['images'] = [additional_images[0]]
+                    else:
+                        variant['images'] = [main_image_url] if main_image_url else []
+                        
+                else:
+                    # Generic variants: Distribute available images
+                    if additional_images and i < len(additional_images):
+                        variant['images'] = [additional_images[i]]
+                    else:
+                        variant['images'] = [main_image_url] if main_image_url else []
+                        
+        except Exception as e:
+            logger.error(f"Error in fallback mapping: {e}")
+
+    def _get_variant_type(self, variant):
+        """Determine the type of variant (color, size, storage, etc.)"""
+        if 'color' in variant:
+            return 'color'
+        elif 'size' in variant:
+            return 'size'
+        elif 'storage' in variant or 'memory' in variant:
+            return 'storage'
+        elif 'capacity' in variant:
+            return 'capacity'
+        else:
+            return 'generic'
+
+    def _is_color_related_image(self, image_url, color_name):
+        """Check if image URL is related to the specific color"""
+        if not color_name:
+            return False
+        
+        url_lower = image_url.lower()
+        color_lower = color_name.lower()
+        
+        # Simple color matching in URL
+        color_mappings = {
+            'red': ['red', 'crimson', 'scarlet'],
+            'blue': ['blue', 'navy', 'azure'],
+            'green': ['green', 'emerald', 'forest'],
+            'black': ['black', 'dark', 'charcoal'],
+            'white': ['white', 'light', 'ivory'],
+            'gray': ['gray', 'grey', 'silver'],
+            'yellow': ['yellow', 'gold', 'amber'],
+            'purple': ['purple', 'violet', 'lavender']
+        }
+        
+        for color_key, color_variants in color_mappings.items():
+            if any(variant in color_lower for variant in color_variants):
+                if any(variant in url_lower for variant in color_variants):
+                    return True
+        
+        return False  # Limit to 6 variants max
     
     def load_existing_data(self):
         """Load existing data from persistent files when scraper starts"""
