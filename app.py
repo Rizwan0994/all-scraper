@@ -105,6 +105,9 @@ def start_scraping():
         logger.info(f"Max products per site: {max_products}")
         logger.info(f"Selected sites: {selected_sites}")
         
+        # Reset stop flag before starting new scraping session
+        scraper.reset_stop_flag()
+        
         # Start scraping in background
         products = scraper.scrape_selected_sites(keywords, max_products, selected_sites)
         
@@ -116,6 +119,29 @@ def start_scraping():
         
     except Exception as e:
         logger.error(f"Scraping error: {e}")
+        return jsonify({
+            'status': 'error',
+            'error': str(e)
+        }), 500
+
+@app.route('/api/scraping/stop', methods=['POST'])
+def stop_scraping():
+    """Stop the current scraping process"""
+    if not check_auth():
+        return jsonify({'status': 'error', 'error': 'Authentication required'}), 401
+    try:
+        # Stop the scraping process
+        scraper.stop_scraping_process()
+        
+        logger.info("Scraping stop requested by user")
+        
+        return jsonify({
+            'status': 'success',
+            'message': 'Scraping stop requested. The process will stop gracefully.'
+        })
+        
+    except Exception as e:
+        logger.error(f"Stop scraping error: {e}")
         return jsonify({
             'status': 'error',
             'error': str(e)
@@ -285,6 +311,60 @@ def download_data(format):
     except Exception as e:
         logger.error(f"Download error: {e}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/products/delete-all', methods=['POST'])
+def delete_all_products():
+    """Delete all scraped products (JSON and CSV files)"""
+    if not check_auth():
+        return jsonify({'error': 'Authentication required'}), 401
+    
+    try:
+        json_file = "scraped_data/products.json"
+        csv_file = "scraped_data/products.csv"
+        
+        deleted_files = []
+        
+        # Delete JSON file if it exists
+        if os.path.exists(json_file):
+            os.remove(json_file)
+            deleted_files.append('products.json')
+            logger.info(f"Deleted {json_file}")
+        
+        # Delete CSV file if it exists
+        if os.path.exists(csv_file):
+            os.remove(csv_file)
+            deleted_files.append('products.csv')
+            logger.info(f"Deleted {csv_file}")
+        
+        # Also clear the scraper's in-memory data
+        scraper.scraped_products = []
+        scraper.total_scraped = 0
+        scraper.current_stats = {
+            'total_products': 0,
+            'site_breakdown': {},
+            'current_site': '',
+            'current_status': 'Ready'
+        }
+        
+        if deleted_files:
+            return jsonify({
+                'success': True,
+                'message': f'Successfully deleted: {", ".join(deleted_files)}',
+                'deleted_files': deleted_files
+            })
+        else:
+            return jsonify({
+                'success': True,
+                'message': 'No product files found to delete',
+                'deleted_files': []
+            })
+            
+    except Exception as e:
+        logger.error(f"Error deleting products: {e}")
+        return jsonify({
+            'success': False,
+            'error': f'Failed to delete products: {str(e)}'
+        }), 500
 
 @app.route('/api/db/connect', methods=['POST'])
 def test_database_connection():

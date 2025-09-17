@@ -165,10 +165,18 @@
                                 </select>
                             </div>
                            
-                            <button type="submit" class="btn btn-scrape btn-lg text-white w-100">
+                            <button type="submit" class="btn btn-scrape btn-lg text-white w-100" id="start-btn">
                                 <i class="fas fa-play"></i> Start Universal Scraping
                             </button>
                         </form>
+                        
+                        <button type="button" class="btn btn-danger btn-lg w-100 mt-3" id="stop-btn" style="display:none;">
+                            <i class="fas fa-stop"></i> Stop Scraping
+                        </button>
+                        
+                        <button type="button" class="btn btn-warning btn-lg w-100 mt-2" id="delete-all-btn">
+                            <i class="fas fa-trash"></i> Delete All Products
+                        </button>
                         
                         <div id="progress" class="mt-4" style="display:none;">
                             <div class="alert alert-info">

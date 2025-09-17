@@ -96,6 +96,23 @@ function initializeFormSubmission() {
                 
                 if (data.status === 'started') {
                     resultsDiv.innerHTML = '<div class="alert alert-success">Scraping started successfully!</div>';
+                    
+                    // Show stop button and hide start button
+                    const startBtn = document.getElementById('start-btn');
+                    const stopBtn = document.getElementById('stop-btn');
+                    
+                    console.log('Start button found:', !!startBtn);
+                    console.log('Stop button found:', !!stopBtn);
+                    
+                    if (startBtn) {
+                        startBtn.style.display = 'none';
+                        console.log('Start button hidden');
+                    }
+                    if (stopBtn) {
+                        stopBtn.style.display = 'block';
+                        console.log('Stop button shown');
+                    }
+                    
                     startStatusPolling();
                 } else {
                     throw new Error(data.error || 'Unknown error');
@@ -105,6 +122,12 @@ function initializeFormSubmission() {
                 console.error('Scraping error:', error);
                 progressDiv.style.display = 'none';
                 resultsDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message}</div>`;
+                
+                // Show start button and hide stop button on error
+                const startBtn = document.getElementById('start-btn');
+                const stopBtn = document.getElementById('stop-btn');
+                if (startBtn) startBtn.style.display = 'block';
+                if (stopBtn) stopBtn.style.display = 'none';
                 
                 // Update status
                 const statusElement = document.getElementById('current-status');
@@ -124,6 +147,75 @@ function initializeButtonHandlers() {
     if (scrapeButton) {
         scrapeButton.addEventListener('click', function(e) {
             console.log('Scrape button clicked');
+        });
+    }
+    
+    // Stop scraping button handler
+    const stopButton = document.getElementById('stop-btn');
+    if (stopButton) {
+        stopButton.addEventListener('click', async function(e) {
+            e.preventDefault();
+            console.log('Stop button clicked');
+            
+            try {
+                const response = await fetch('/api/scraping/stop', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'}
+                });
+                
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    showAlert('Scraping will stop gracefully...', 'warning');
+                    // Hide stop button and show start button
+                    stopButton.style.display = 'none';
+                    document.getElementById('start-btn').style.display = 'block';
+                } else {
+                    showAlert('Error stopping scraping: ' + result.error, 'danger');
+                }
+            } catch (error) {
+                console.error('Error stopping scraping:', error);
+                showAlert('Error stopping scraping. Please try again.', 'danger');
+            }
+        });
+    }
+    
+    // Delete all products button handler
+    const deleteAllButton = document.getElementById('delete-all-btn');
+    if (deleteAllButton) {
+        deleteAllButton.addEventListener('click', async function(e) {
+            e.preventDefault();
+            console.log('Delete all button clicked');
+            
+            // Show confirmation dialog
+            if (!confirm('Are you sure you want to delete all scraped products? This will remove both JSON and CSV files and cannot be undone.')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/products/delete-all', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'}
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showAlert(result.message, 'success');
+                    // Clear the products display
+                    const productsContainer = document.getElementById('liveProducts');
+                    if (productsContainer) {
+                        productsContainer.innerHTML = '<div class="text-center text-muted p-4">No products available. Start scraping to see results.</div>';
+                    }
+                    // Update product count
+                    updateProductCount(0);
+                } else {
+                    showAlert('Error deleting products: ' + result.error, 'danger');
+                }
+            } catch (error) {
+                console.error('Error deleting products:', error);
+                showAlert('Error deleting products. Please try again.', 'danger');
+            }
         });
     }
 }
@@ -506,6 +598,13 @@ socket.on('scraping_complete', function(data) {
     console.log('Scraping complete:', data);
     showCompletionSummary(data);
     updateStatus('ready', 'Complete');
+    
+    // Show start button and hide stop button when scraping completes
+    const startBtn = document.getElementById('start-btn');
+    const stopBtn = document.getElementById('stop-btn');
+    if (startBtn) startBtn.style.display = 'block';
+    if (stopBtn) stopBtn.style.display = 'none';
+    
     loadProducts();
     // Reload product count after scraping
     loadProductCount();
@@ -661,4 +760,35 @@ async function autoFillDatabaseCredentials() {
     } catch (error) {
         console.error('Error auto-filling database credentials:', error);
     }
+}
+
+// Helper function to show alerts
+function showAlert(message, type = 'info') {
+    const alertTypes = {
+        'success': 'alert-success',
+        'error': 'alert-danger',
+        'danger': 'alert-danger',
+        'warning': 'alert-warning',
+        'info': 'alert-info'
+    };
+    
+    const alertClass = alertTypes[type] || 'alert-info';
+    const alertHtml = `<div class="alert ${alertClass}">${message}</div>`;
+    
+    // Try to find a results div to show the alert
+    const resultsDiv = document.getElementById('results');
+    if (resultsDiv) {
+        resultsDiv.innerHTML = alertHtml;
+    } else {
+        // Fallback to browser alert
+        alert(message);
+    }
+}
+
+// Helper function to update product count
+function updateProductCount(count) {
+    const countElements = document.querySelectorAll('#productCount');
+    countElements.forEach(element => {
+        element.textContent = count;
+    });
 }
