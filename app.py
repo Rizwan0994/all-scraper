@@ -19,12 +19,12 @@ import io
 from scraper.universal_scraper import UniversalScraper, Product
 from db_manager import DatabaseManager
 
-# Configure logging
+# Configure logging with UTF-8 encoding for Windows compatibility
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('scraper.log'),
+        logging.FileHandler('scraper.log', encoding='utf-8'),
         logging.StreamHandler()
     ]
 )

@@ -114,8 +114,8 @@ class Product:
 # Category mapping for better organization
 CATEGORY_MAPPING = {
     "Electronics": {
-        "keywords": ["phone", "laptop", "tablet", "headphones", "speaker", "camera", "tv", "computer"],
-        "subcategories": ["Smartphones", "Laptops", "Tablets", "Audio", "Cameras", "TVs", "Computers"]
+        "keywords": ["phone", "laptop", "tablet", "headphones", "speaker", "camera", "tv", "computer", "xbox", "playstation", "nintendo", "gaming", "console", "controller", "gaming console", "wireless controller", "gaming controller", "ssd", "digital", "cloud-enabled", "gift card", "digital code"],
+        "subcategories": ["Smartphones", "Laptops", "Tablets", "Audio", "Cameras", "TVs", "Computers", "Gaming", "Gaming Consoles", "Gaming Accessories", "Digital Products"]
     },
     "Fashion": {
         "keywords": ["shirt", "dress", "shoes", "jeans", "jacket", "bag", "watch", "jewelry"],
@@ -154,13 +154,14 @@ def categorize_product(title, description=""):
     return "Electronics", "General"  # Default category
 
 class UniversalScraper:
-    """Universal scraper with advanced anti-detection"""
+    """AI-Powered Universal Scraper with 100% Accuracy Target"""
     
     def __init__(self, socketio=None):
         # Multiple session types for different approaches
         self.session = requests.Session()
         self.cloud_scraper = cloudscraper.create_scraper()
         self.driver = None
+        self.stealth_driver = None
         
         self.setup_session()
         self.results = []
@@ -175,15 +176,264 @@ class UniversalScraper:
             'current_status': 'Ready'
         }
         
-        # Anti-detection settings
+        # Enhanced anti-detection settings
         self.proxy_list = []
         self.current_proxy_index = 0
         self.request_count = 0
+        
+        # AI-Powered extraction settings
+        self.use_dynamic_extraction = True
+        self.js_execution_timeout = 30
+        self.gallery_interaction_delay = 2
+        self.variant_interaction_delay = 3
+        
+        # Performance optimization
+        self.max_concurrent_requests = 3
+        self.request_delay_range = (2, 5)
+        self.image_quality_threshold = 300  # Minimum pixel width
+        
+        # Data validation settings
+        self.min_images_per_product = 3
+        self.min_variants_for_variant_products = 2
+        self.data_accuracy_threshold = 0.95
         self.last_request_time = 0
         
         # Create data directory
         os.makedirs('scraped_data', exist_ok=True)
         os.makedirs('images', exist_ok=True)
+        
+        # Initialize stealth driver for dynamic content
+        self._init_stealth_driver()
+
+    def _init_stealth_driver(self):
+        """Initialize undetected Chrome driver with stealth configuration"""
+        try:
+            if not uc:
+                logger.warning("Undetected Chrome driver not available, falling back to regular Selenium")
+                return False
+            
+            # Advanced stealth options
+            options = uc.ChromeOptions()
+            
+            # Stealth settings
+            options.add_argument('--no-sandbox')
+            options.add_argument('--disable-dev-shm-usage')
+            options.add_argument('--disable-blink-features=AutomationControlled')
+            options.add_experimental_option("excludeSwitches", ["enable-automation"])
+            options.add_experimental_option('useAutomationExtension', False)
+            options.add_argument('--disable-extensions')
+            options.add_argument('--disable-plugins-discovery')
+            options.add_argument('--disable-web-security')
+            options.add_argument('--allow-running-insecure-content')
+            
+            # Performance optimization
+            options.add_argument('--disable-images')  # We'll load images separately
+            options.add_argument('--disable-javascript-harmony-shipping')
+            options.add_argument('--disable-background-timer-throttling')
+            options.add_argument('--disable-renderer-backgrounding')
+            options.add_argument('--disable-backgrounding-occluded-windows')
+            
+            # User agent rotation
+            user_agents = [
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            ]
+            options.add_argument(f'--user-agent={random.choice(user_agents)}')
+            
+            # Create undetected driver
+            self.stealth_driver = uc.Chrome(options=options, version_main=None)
+            
+            # Execute stealth script
+            self.stealth_driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            
+            logger.info("Stealth Chrome driver initialized successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize stealth driver: {e}")
+            return False
+
+    def _get_dynamic_content(self, url, wait_for_selectors=None, interact_with_gallery=True):
+        """Get page content with JavaScript execution and dynamic interaction"""
+        try:
+            if not self.stealth_driver:
+                logger.warning("Stealth driver not available, falling back to static scraping")
+                return self._get_static_content(url)
+            
+            logger.info(f"🤖 Loading dynamic content from: {url[:60]}...")
+            
+            # Navigate to page
+            self.stealth_driver.get(url)
+            
+            # Wait for page load
+            WebDriverWait(self.stealth_driver, 15).until(
+                EC.presence_of_element_located((By.TAG_NAME, "body"))
+            )
+            
+            # Wait for specific selectors if provided
+            if wait_for_selectors:
+                for selector in wait_for_selectors:
+                    try:
+                        WebDriverWait(self.stealth_driver, 10).until(
+                            EC.presence_of_element_located((By.CSS_SELECTOR, selector))
+                        )
+                    except TimeoutException:
+                        logger.debug(f"Selector {selector} not found within timeout")
+            
+            # Simulate human behavior
+            self._simulate_human_behavior()
+            
+            # Interact with image gallery if requested
+            if interact_with_gallery:
+                self._interact_with_gallery()
+            
+            # Execute JavaScript to load all dynamic content
+            self._execute_content_loading_scripts()
+            
+            # Get the final HTML
+            html = self.stealth_driver.page_source
+            return BeautifulSoup(html, 'html.parser')
+            
+        except Exception as e:
+            logger.error(f"Error getting dynamic content: {e}")
+            return self._get_static_content(url)
+
+    def _get_static_content(self, url):
+        """Fallback to static content retrieval"""
+        try:
+            response = self.safe_request(url)
+            if response and response.status_code == 200:
+                return BeautifulSoup(response.content, 'html.parser')
+        except Exception as e:
+            logger.error(f"Error getting static content: {e}")
+        return None
+
+    def _simulate_human_behavior(self):
+        """Simulate human-like browsing behavior"""
+        try:
+            # Random scroll to trigger lazy loading
+            scroll_heights = [300, 500, 800, 1200, 1500]
+            for height in random.sample(scroll_heights, 3):
+                self.stealth_driver.execute_script(f"window.scrollTo(0, {height});")
+                time.sleep(random.uniform(0.5, 1.5))
+            
+            # Scroll back to top
+            self.stealth_driver.execute_script("window.scrollTo(0, 0);")
+            time.sleep(1)
+            
+        except Exception as e:
+            logger.debug(f"Error simulating human behavior: {e}")
+
+    def _interact_with_gallery(self):
+        """Interact with product image gallery to load all images"""
+        try:
+            # Gallery selectors to interact with
+            gallery_selectors = [
+                '#altImages img',
+                '.imageThumbnail',
+                '.a-button-thumbnail',
+                '[data-action="main-image-click"]',
+                '.gallery-thumbnail',
+                '.media-gallery-item'
+            ]
+            
+            for selector in gallery_selectors:
+                try:
+                    elements = self.stealth_driver.find_elements(By.CSS_SELECTOR, selector)
+                    for i, element in enumerate(elements[:8]):  # Interact with first 8 images
+                        try:
+                            # Hover over element to trigger any hover effects
+                            self.stealth_driver.execute_script("arguments[0].dispatchEvent(new MouseEvent('mouseover', {bubbles: true}));", element)
+                            time.sleep(0.5)
+                            
+                            # Click to load high-res image
+                            if element.is_displayed() and element.is_enabled():
+                                element.click()
+                                time.sleep(random.uniform(1, 2))
+                                
+                        except Exception as e:
+                            logger.debug(f"Error interacting with gallery element {i}: {e}")
+                            continue
+                            
+                except Exception as e:
+                    logger.debug(f"Error finding gallery elements with selector {selector}: {e}")
+                    continue
+            
+            logger.info(f"Gallery interaction completed")
+            
+        except Exception as e:
+            logger.debug(f"Error interacting with gallery: {e}")
+
+    def _execute_content_loading_scripts(self):
+        """Execute JavaScript to ensure all content is loaded"""
+        try:
+            scripts = [
+                # Load all lazy images
+                """
+                document.querySelectorAll('img[data-src]').forEach(img => {
+                    if (img.dataset.src) {
+                        img.src = img.dataset.src;
+                    }
+                });
+                """,
+                
+                # Trigger any lazy loading
+                """
+                window.dispatchEvent(new Event('scroll'));
+                window.dispatchEvent(new Event('resize'));
+                """,
+                
+                # Load Amazon-specific dynamic content
+                """
+                if (window.ImageBlockATF) {
+                    console.log('Amazon ImageBlockATF detected');
+                }
+                if (window.DetailPageMediaMatrix) {
+                    console.log('Amazon MediaMatrix detected');
+                }
+                """,
+                
+                # Wait for all images to load
+                """
+                return new Promise((resolve) => {
+                    const images = document.querySelectorAll('img');
+                    let loadedCount = 0;
+                    const totalImages = images.length;
+                    
+                    if (totalImages === 0) {
+                        resolve(true);
+                        return;
+                    }
+                    
+                    images.forEach(img => {
+                        if (img.complete) {
+                            loadedCount++;
+                        } else {
+                            img.onload = img.onerror = () => {
+                                loadedCount++;
+                                if (loadedCount === totalImages) {
+                                    resolve(true);
+                                }
+                            };
+                        }
+                    });
+                    
+                    // Fallback timeout
+                    setTimeout(() => resolve(true), 5000);
+                });
+                """
+            ]
+            
+            for script in scripts[:-1]:  # Execute synchronous scripts
+                self.stealth_driver.execute_script(script)
+                time.sleep(0.5)
+            
+            # Execute async script for image loading
+            self.stealth_driver.execute_async_script(scripts[-1])
+            
+        except Exception as e:
+            logger.debug(f"Error executing content loading scripts: {e}")
         
         # Setup signal handlers for graceful shutdown
         self.setup_signal_handlers()
@@ -300,13 +550,424 @@ class UniversalScraper:
         
         return None
     
+    def _find_amazon_products(self, soup):
+        """Find Amazon product items using enhanced 2024 selectors"""
+        # Priority order of selectors for 2024 Amazon structure
+        selectors = [
+            # Primary selectors for search results
+            'div[data-component-type="s-search-result"]',
+            'div[data-asin]:not([data-asin=""])',
+            '.s-result-item[data-asin]',
+            
+            # Alternative selectors
+            '.s-card-container[data-asin]',
+            '.puis-card-container[data-asin]',
+            'div[data-asin]',
+            
+            # Fallback selectors
+            '.s-result-item',
+            '.s-card-container',
+            '.puis-card-container',
+            '[data-testid="product-card"]'
+        ]
+        
+        items = []
+        for selector in selectors:
+            items = soup.select(selector)[:30]
+            if items:
+                logger.info(f"Found {len(items)} products using selector: {selector}")
+                break
+        
+        if not items:
+            # Debug: Log some HTML content to see what we're getting
+            debug_content = soup.get_text()[:500] if soup else "No content"
+            logger.debug(f"Amazon debug content: {debug_content}")
+            
+            # Try to find any divs with data-asin
+            all_divs = soup.find_all('div')
+            asin_divs = [div for div in all_divs if div.get('data-asin')]
+            logger.debug(f"Amazon: Found {len(asin_divs)} divs with data-asin")
+            
+            # Try to find any product-like elements
+            product_elements = soup.find_all(['div', 'article'], class_=lambda x: x and any(word in x.lower() for word in ['product', 'item', 'card', 'result']))
+            logger.debug(f"Amazon: Found {len(product_elements)} product-like elements")
+        
+        return items
+    
+    def _extract_amazon_price(self, item):
+        """Extract price from Amazon product item using 2024 selectors"""
+        # Updated price selectors for 2024 Amazon structure
+        price_selectors = [
+            # Primary price selectors (most reliable)
+            '.a-price .a-offscreen',
+            '.a-price-whole',
+            '.a-price-current .a-offscreen',
+            '.a-price-current .a-price-whole',
+            
+            # Alternative selectors
+            '.a-price-range .a-offscreen',
+            '.a-price-symbol + .a-price-whole',
+            '.a-price-deal .a-offscreen',
+            '.a-price-sale .a-offscreen',
+            
+            # Fallback selectors
+            '.a-price .a-text-price',
+            '.a-price-current',
+            '.a-price-current .a-text-price',
+            '[data-a-price]',
+            
+            # Legacy selectors (still used in some cases)
+            '.a-price',
+            '.a-offscreen',
+            '.a-price-range',
+            '.a-price-symbol',
+            '.a-price-fraction',
+            '.a-price-decimal'
+        ]
+        
+        price_text = None
+        price_elem = None
+        
+        # Try each selector in priority order
+        for selector in price_selectors:
+            price_elem = item.select_one(selector)
+            if price_elem:
+                price_text = price_elem.get_text(strip=True)
+                if price_text and '$' in price_text:
+                    logger.debug(f"Found price using selector '{selector}': {price_text}")
+                    break
+        
+        # If no price element found, try to find any price-like text
+        if not price_text:
+            item_text = item.get_text()
+            # Look for price patterns in the text
+            price_match = re.search(r'\$[\d,]+\.?\d*', item_text)
+            if price_match:
+                price_text = price_match.group()
+                logger.debug(f"Found price using regex: {price_text}")
+            else:
+                # Try to find any number that looks like a price
+                price_match = re.search(r'[\d,]+\.?\d*', item_text)
+                if price_match:
+                    price_text = f"${price_match.group()}"
+                    logger.debug(f"Found price using fallback regex: {price_text}")
+        
+        if price_text:
+            logger.debug(f"Price text found: '{price_text}'")
+            price = self.extract_price(price_text)
+            return self.ensure_valid_price(price, "Amazon Product", 'amazon')
+        
+        return 0.0
+    
+    def _extract_amazon_title(self, item):
+        """Extract title from Amazon product item using 2024 selectors"""
+        # Updated title selectors for 2024 Amazon structure
+        title_selectors = [
+            # Primary title selectors
+            'h2.a-color-base',
+            'h2.a-size-base-plus',
+            'h2.a-text-normal',
+            'h2.a-size-medium',
+            'h2.a-size-large',
+            
+            # Alternative selectors
+            'span.a-color-base',
+            'span.a-size-base-plus',
+            'span.a-text-normal',
+            'span.a-size-medium',
+            'span.a-size-large',
+            
+            # Generic selectors
+            'h2',
+            'h3',
+            '.a-size-base-plus',
+            '.a-text-normal',
+            '.a-size-medium',
+            '.a-size-large',
+            
+            # Fallback selectors
+            '[data-cy="title-recipe"]',
+            '[data-testid="product-title"]',
+            '.product-title',
+            '.a-link-normal'
+        ]
+        
+        title_elem = None
+        for selector in title_selectors:
+            title_elem = item.select_one(selector)
+            if title_elem:
+                title_text = title_elem.get_text(strip=True)
+                if title_text and len(title_text) > 10:
+                    logger.debug(f"Found title using selector '{selector}': {title_text[:50]}...")
+                    return self.clean_text(title_text)
+        
+        # If no title element found, try to find any text that looks like a title
+        item_text = item.get_text()
+        if len(item_text) > 10 and len(item_text) < 200:
+            return self.clean_text(item_text)
+        
+        return None
+    
+    def _extract_amazon_rating_reviews(self, item):
+        """Extract rating and review count from Amazon product item using 2024 selectors"""
+        # Updated rating selectors for 2024 Amazon structure
+        rating_selectors = [
+            '.a-icon-alt',
+            '.a-icon-star .a-icon-alt',
+            '[data-hook="rating-out-of-text"]',
+            '.a-icon-star-small .a-icon-alt',
+            '.a-icon-star-medium .a-icon-alt',
+            '.a-icon-star-large .a-icon-alt',
+            '.a-icon-star .a-icon-alt',
+            '.a-icon-star-small .a-icon-alt',
+            '.a-icon-star-medium .a-icon-alt',
+            '.a-icon-star-large .a-icon-alt'
+        ]
+        
+        # Updated review count selectors for 2024 Amazon structure
+        review_selectors = [
+            '#acrCustomerReviewText',
+            '[data-hook="total-review-count"]',
+            '.a-size-base.a-color-secondary',
+            '.a-size-small.a-color-secondary',
+            '.a-size-base',
+            '.a-size-small'
+        ]
+        
+        rating = 0.0
+        review_count = 0
+        
+        # Extract rating
+        for selector in rating_selectors:
+            rating_elem = item.select_one(selector)
+            if rating_elem:
+                rating_text = rating_elem.get_text(strip=True)
+                rating_match = re.search(r'[\d.]+', rating_text)
+                if rating_match:
+                    rating = float(rating_match.group())
+                    logger.debug(f"Found rating using selector '{selector}': {rating}")
+                    break
+        
+        # Extract review count
+        for selector in review_selectors:
+            review_elem = item.select_one(selector)
+            if review_elem:
+                review_text = review_elem.get_text(strip=True)
+                review_match = re.search(r'[\d,]+', review_text)
+                if review_match:
+                    review_count = int(review_match.group().replace(',', ''))
+                    logger.debug(f"Found review count using selector '{selector}': {review_count}")
+                    break
+        
+        return rating, review_count
+    
+    def _extract_amazon_link(self, item, title):
+        """Extract product link from Amazon product item using 2024 selectors"""
+        # Updated link selectors for 2024 Amazon structure
+        link_selectors = [
+            # Primary link selectors
+            'h2 a',
+            'h3 a',
+            '.a-link-normal',
+            '.a-text-normal',
+            
+            # Alternative selectors
+            '[data-cy="title-recipe"]',
+            '[data-testid="product-link"]',
+            '.a-link-normal[href*="/dp/"]',
+            '.a-link-normal[href*="/gp/product/"]',
+            
+            # Fallback selectors
+            'a[href*="/dp/"]',
+            'a[href*="/gp/product/"]',
+            'a[href*="amazon.com"]'
+        ]
+        
+        for selector in link_selectors:
+            link_elem = item.select_one(selector)
+            if link_elem and link_elem.get('href'):
+                href = link_elem.get('href')
+                if href.startswith('/'):
+                    product_url = f"https://www.amazon.com{href}"
+                else:
+                    product_url = href
+                logger.debug(f"Found product link using selector '{selector}': {product_url[:50]}...")
+                return product_url
+        
+        # Fallback: Generate search URL using product title
+        logger.debug(f"No product link found, generating fallback URL for: {title[:30]}...")
+        return f"https://www.amazon.com/s?k={quote_plus(title)}"
+    
+    def _extract_amazon_main_image(self, item):
+        """Extract main product image from Amazon product item using 2024 selectors"""
+        # Updated image selectors for 2024 Amazon structure
+        image_selectors = [
+            # Primary image selectors
+            '.s-product-image-container img',
+            '.s-image img',
+            '.a-dynamic-image',
+            '.a-image-container img',
+            
+            # Alternative selectors
+            'img[data-src]',
+            'img[src*="media-amazon.com"]',
+            'img[src*="images-amazon.com"]',
+            'img[alt*="product"]',
+            
+            # Fallback selectors
+            'img',
+            '.a-image img',
+            '.product-image img'
+        ]
+        
+        for selector in image_selectors:
+            img_elem = item.select_one(selector)
+            if img_elem:
+                # Try data-src first (lazy loading), then src
+                image_url = img_elem.get('data-src') or img_elem.get('src')
+                if image_url and 'amazon' in image_url.lower():
+                    # Convert to high-quality image
+                    high_quality_url = self._convert_to_high_quality_image(image_url)
+                    logger.debug(f"Found product image using selector '{selector}': {high_quality_url[:50]}...")
+                    return high_quality_url
+        
+        logger.debug("No product image found")
+        return ""
+    
+    def _extract_structured_data(self, soup, product_name):
+        """Extract structured data from JSON-LD scripts for enhanced accuracy"""
+        structured_data = {}
+        try:
+            # Look for JSON-LD scripts containing product data
+            scripts = soup.find_all('script', type='application/ld+json')
+            for script in scripts:
+                try:
+                    data = json.loads(script.get_text())
+                    if isinstance(data, dict):
+                        # Extract product information
+                        if 'name' in data:
+                            structured_data['name'] = data['name']
+                        if 'description' in data:
+                            structured_data['description'] = data['description']
+                        if 'brand' in data:
+                            structured_data['brand'] = data['brand']
+                        if 'offers' in data:
+                            offers = data['offers']
+                            if isinstance(offers, dict):
+                                if 'price' in offers:
+                                    structured_data['price'] = offers['price']
+                                if 'priceCurrency' in offers:
+                                    structured_data['currency'] = offers['priceCurrency']
+                                if 'availability' in offers:
+                                    structured_data['availability'] = offers['availability']
+                        if 'aggregateRating' in data:
+                            rating_data = data['aggregateRating']
+                            if 'ratingValue' in rating_data:
+                                structured_data['rating'] = rating_data['ratingValue']
+                            if 'reviewCount' in rating_data:
+                                structured_data['review_count'] = rating_data['reviewCount']
+                        if 'image' in data:
+                            images = data['image']
+                            if isinstance(images, list):
+                                structured_data['images'] = images
+                            else:
+                                structured_data['images'] = [images]
+                except (json.JSONDecodeError, KeyError):
+                    continue
+        except Exception as e:
+            logger.debug(f"Structured data extraction failed: {e}")
+        return structured_data
+    
+    def _enhance_product_with_structured_data(self, product, structured_data):
+        """Enhance product data with structured data if available"""
+        if not structured_data:
+            return product
+        
+        # Update product name if structured data has a better one
+        if 'name' in structured_data and len(structured_data['name']) > len(product.product_name):
+            product.product_name = structured_data['name']
+        
+        # Update price if structured data has it and current price is 0
+        if 'price' in structured_data and product.unit_price <= 0:
+            try:
+                price = float(structured_data['price'])
+                if price > 0:
+                    product.unit_price = price
+            except (ValueError, TypeError):
+                pass
+        
+        # Update rating if structured data has it
+        if 'rating' in structured_data and product.rating <= 0:
+            try:
+                rating = float(structured_data['rating'])
+                if 0 <= rating <= 5:
+                    product.rating = rating
+            except (ValueError, TypeError):
+                pass
+        
+        # Update review count if structured data has it
+        if 'review_count' in structured_data and product.review_count <= 0:
+            try:
+                review_count = int(structured_data['review_count'])
+                if review_count >= 0:
+                    product.review_count = review_count
+            except (ValueError, TypeError):
+                pass
+        
+        # Update images if structured data has them
+        if 'images' in structured_data and isinstance(structured_data['images'], list):
+            new_images = [img for img in structured_data['images'] if img and 'amazon' in img.lower()]
+            if new_images:
+                product.product_images = new_images
+        
+        return product
+    
+    def _handle_amazon_rate_limiting(self, response, attempt=1):
+        """Handle Amazon rate limiting and CAPTCHA detection"""
+        if response and response.status_code == 429:
+            # Rate limited - wait longer
+            wait_time = min(60, 5 * (2 ** attempt))
+            logger.warning(f"Rate limited by Amazon. Waiting {wait_time} seconds...")
+            time.sleep(wait_time)
+            return True
+        elif response and response.status_code == 503:
+            # Service unavailable - wait and retry
+            wait_time = min(30, 3 * (2 ** attempt))
+            logger.warning(f"Amazon service unavailable. Waiting {wait_time} seconds...")
+            time.sleep(wait_time)
+            return True
+        elif response and 'captcha' in response.text.lower():
+            # CAPTCHA detected
+            logger.error("CAPTCHA detected by Amazon. Please try again later.")
+            return False
+        return False
+    
+    def _improve_amazon_headers(self):
+        """Improve headers to better mimic real browser behavior"""
+        self.session.headers.update({
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache',
+            'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Upgrade-Insecure-Requests': '1'
+        })
+    
     def scrape_amazon(self, keywords, max_products=100):
-        """Scrape Amazon products with real data only"""
+        """Scrape Amazon products with real data only - Enhanced for 2024"""
         self.current_stats['current_site'] = 'Amazon'
         self.current_stats['current_status'] = 'Scraping Amazon...'
         
-        # Setup Amazon-specific session
+        # Setup Amazon-specific session with enhanced headers
         self.setup_site_specific_session('amazon')
+        self._improve_amazon_headers()
         self.emit_update('status_update', self.current_stats)
         
         products_added = 0
@@ -337,54 +998,11 @@ class UniversalScraper:
                     logger.error(f"Amazon: CAPTCHA detected for '{keyword}'")
                     continue
             
-            # Try multiple selectors for Amazon products - updated for 2024
-            items = soup.find_all('div', {'data-component-type': 's-search-result'})[:30]
-            
-            if not items:
-                items = soup.find_all('div', {'data-asin': True})[:30]
-            
-            if not items:
-                items = soup.select('[data-asin]')[:30]
-            
-            if not items:
-                items = soup.select('.s-result-item')[:30]
-            
-            if not items:
-                items = soup.select('[data-testid="product-card"]')[:30]
-            
-            if not items:
-                items = soup.select('.s-card-container')[:30]
-            
-            if not items:
-                items = soup.select('.s-include-content-margin')[:30]
-            
-            if not items:
-                items = soup.select('.a-section')[:30]
-            
-            if not items:
-                items = soup.select('.s-result-item[data-asin]')[:30]
-            
-            if not items:
-                items = soup.select('div[data-asin]:not([data-asin=""])')[:30]
-            
-            if not items:
-                items = soup.select('.s-result-item, .s-card-container, [data-asin]')[:30]
+            # Enhanced product selectors for 2024 Amazon structure
+            items = self._find_amazon_products(soup)
             
             if not items:
                 logger.warning(f"Amazon: No items found for '{keyword}'")
-                # Debug: Log some HTML content to see what we're getting
-                debug_content = soup.get_text()[:500] if soup else "No content"
-                logger.debug(f"Amazon debug content: {debug_content}")
-                
-                # Try to find any divs with data-asin
-                all_divs = soup.find_all('div')
-                asin_divs = [div for div in all_divs if div.get('data-asin')]
-                logger.debug(f"Amazon: Found {len(asin_divs)} divs with data-asin")
-                
-                # Try to find any product-like elements
-                product_elements = soup.find_all(['div', 'article'], class_=lambda x: x and any(word in x.lower() for word in ['product', 'item', 'card', 'result']))
-                logger.debug(f"Amazon: Found {len(product_elements)} product-like elements")
-                
                 continue
             
             for i, item in enumerate(items):
@@ -392,58 +1010,14 @@ class UniversalScraper:
                     break
                     
                 try:
-                    # Title - try multiple selectors for Amazon
-                    title_elem = (item.find('h2', class_='a-color-base') or 
-                                 item.find('span', class_='a-size-base-plus') or
-                                 item.find('span', class_='a-text-normal') or
-                                 item.find('h2') or
-                                 item.find('span', class_='a-size-medium') or
-                                 item.find('span', class_='a-size-large'))
+                    # Enhanced title extraction using 2024 selectors
+                    title = self._extract_amazon_title(item)
                     
-                    if not title_elem:
-                        # Try to find any text that looks like a title
-                        title_text = item.get_text()
-                        if len(title_text) > 10 and len(title_text) < 200:
-                            title = self.clean_text(title_text)
-                        else:
+                    if not title or len(title) < 10 or title.lower() in ['results', 'no title']:
                             continue
-                    else:
-                        title = self.clean_text(title_elem.get_text())
-                        
-                    if len(title) < 10 or title.lower() in ['results', 'no title']:
-                        continue
                     
-                    # Price - try multiple selectors and ensure valid price
-                    price_elem = (item.find('span', class_='a-price-whole') or 
-                                 item.find('span', class_='a-price') or
-                                 item.find('span', class_='a-offscreen') or
-                                 item.find('span', class_='a-price-range') or
-                                 item.find('span', class_='a-price-symbol') or
-                                 item.find('span', class_='a-price-fraction') or
-                                 item.find('span', class_='a-price-decimal'))
-                    
-                    # If no price element found, try to find any price-like text
-                    if not price_elem:
-                        price_text = item.get_text()
-                        # Look for price patterns in the text
-                        price_match = re.search(r'\$[\d,]+\.?\d*', price_text)
-                        if price_match:
-                            price_text = price_match.group()
-                        else:
-                            # Try to find any number that looks like a price
-                            price_match = re.search(r'[\d,]+\.?\d*', price_text)
-                            if price_match:
-                                price_text = f"${price_match.group()}"
-                            else:
-                                price_text = "0"
-                    else:
-                        price_text = price_elem.get_text(strip=True)
-                    
-                    # Debug: Log the price text found
-                    logger.debug(f"Price text found: '{price_text}' for product: {title[:30]}...")
-                    
-                    price = self.extract_price(price_text)
-                    price = self.ensure_valid_price(price, title, 'amazon')
+                    # Enhanced price extraction using 2024 selectors
+                    price = self._extract_amazon_price(item)
                     
                     # Debug: Log the extracted price
                     logger.debug(f"Extracted price: {price} for product: {title[:30]}...")
@@ -453,57 +1027,26 @@ class UniversalScraper:
                         logger.debug(f"Skipping product with no price: {title[:30]}...")
                         continue
                     
-                    # Link - try multiple approaches to find product links
-                    link_elem = None
-                    # First try to find link in h2
-                    h2_elem = item.find('h2')
-                    if h2_elem:
-                        link_elem = h2_elem.find('a')
+                    # Enhanced link extraction using 2024 selectors
+                    product_url = self._extract_amazon_link(item, title)
                     
-                    # If no link in h2, try to find any link in the item
-                    if not link_elem:
-                        link_elem = item.find('a', href=True)
+                    # Enhanced image extraction using 2024 selectors
+                    main_image_url = self._extract_amazon_main_image(item)
                     
-                    # If still no link, try to find link by data attributes
-                    if not link_elem:
-                        link_elem = item.find('a', {'data-cy': 'title-recipe'}) or item.find('a', {'data-testid': 'product-link'})
-                    
-                    if link_elem and link_elem.get('href'):
-                        href = link_elem.get('href')
-                        if href.startswith('/'):
-                            product_url = f"https://www.amazon.com{href}"
-                        else:
-                            product_url = href
-                    else:
-                        # Generate fallback URL using product title
-                        product_url = f"https://www.amazon.com/s?k={quote_plus(title)}"
-                    
-                    # Image - Get main image from search results
-                    img_elem = item.find('img')
-                    main_image_url = img_elem.get('src') if img_elem else ""
-                    
-                    # Get additional images by visiting product page
+                    # Get additional images using AI-enhanced approach
                     additional_images = []
                     if product_url and main_image_url:
-                        logger.info(f"Attempting to scrape additional images from: {product_url[:50]}...")
-                        additional_images = self.scrape_product_images(product_url, site='amazon')
-                        logger.info(f"Found {len(additional_images)} additional images")
+                        logger.info(f"AI-Enhanced image extraction from: {product_url[:50]}...")
+                        additional_images = self.scrape_product_images(product_url, site='amazon', max_images=15)
+                        logger.info(f"Found {len(additional_images)} high-quality images")
                     
                     # Combine main image with additional images
                     all_images = [main_image_url] + additional_images if main_image_url else additional_images
                     # Remove duplicates and empty URLs
                     all_images = list(dict.fromkeys([img for img in all_images if img and img.strip()]))
                     
-                    # Rating and reviews
-                    rating_elem = item.find('span', class_='a-icon-alt')
-                    rating_text = rating_elem.get_text(strip=True) if rating_elem else ""
-                    if re.findall(r'[\d.]+', rating_text):
-                        rating = float(re.findall(r'[\d.]+', rating_text)[0])
-                    else:
-                        rating = 0.0
-                    
-                    review_elem = item.find('span', class_='a-size-base')
-                    review_count = int(re.findall(r'[\d,]+', review_elem.get_text(strip=True))[0].replace(',', '')) if review_elem and re.findall(r'[\d,]+', review_elem.get_text(strip=True)) else 0
+                    # Enhanced rating and review extraction
+                    rating, review_count = self._extract_amazon_rating_reviews(item)
                     
                     # Auto-categorize
                     category, sub_category = categorize_product(title)
@@ -522,11 +1065,16 @@ class UniversalScraper:
                     except Exception as e:
                         logger.warning(f"Failed to fetch product page for variants: {e}")
 
-                    # Extract variants if available (prefer product_soup)
-                    variants = self.extract_variants(product_soup or soup, title)
+                    # Extract variants if available (prefer product_soup) with main price fallback
+                    variants = self.extract_variants(product_soup or soup, title, main_price=price)
                     
-                    # REALISTIC VARIANT-IMAGE MAPPING
+                    # Extract structured data for enhanced accuracy
+                    structured_data = self._extract_structured_data(product_soup or soup, title)
+                    
+                    # ENHANCED IMAGE AND VARIANT MAPPING
                     additional_images = all_images[1:] if len(all_images) > 1 else []
+                    logger.info(f"Total images found: {len(all_images)}, Main image: {1 if all_images else 0}, Additional images: {len(additional_images)}")
+                    
                     if variants:
                         logger.info(f"Mapping {len(additional_images)} additional images to {len(variants)} variants realistically")
                         
@@ -540,6 +1088,14 @@ class UniversalScraper:
                             # Fallback: Intelligent image distribution based on variant type
                             logger.info("No variant-specific images found, using intelligent fallback")
                             self._map_variant_images_fallback(variants, additional_images, main_image_url)
+                        
+                        # For products with variants, keep first 3-5 additional images for the main product too
+                        final_additional_images = additional_images[:5] if len(additional_images) > 2 else additional_images
+                        logger.info(f"Product has variants, storing {len(final_additional_images)} main product images and variant-specific images")
+                    else:
+                        # For products WITHOUT variants, keep all additional images in additional_images
+                        final_additional_images = additional_images
+                        logger.info(f"Product has no variants, storing {len(final_additional_images)} images as additional_images")
                     
                     # Create the product
                     product = Product(
@@ -554,7 +1110,7 @@ class UniversalScraper:
                         product_description=f"Quality {title} from Amazon with fast shipping and customer support",
                         meta_tags_description=f"Buy {title} from Amazon at competitive prices",
                         product_images=all_images[:1] if all_images else [],  # First image as main
-                        additional_images=[],  # Additional images now go to variants
+                        additional_images=final_additional_images,  # Store additional images based on variant status
                         rating=rating,
                         review_count=review_count,
                         source_site='Amazon',
@@ -566,6 +1122,9 @@ class UniversalScraper:
                         current_stock=0,
                         variants=variants
                     )
+                    
+                    # Enhance product with structured data for better accuracy
+                    product = self._enhance_product_with_structured_data(product, structured_data)
                     
                     if self.add_product(product):
                         products_added += 1
@@ -581,128 +1140,478 @@ class UniversalScraper:
         logger.info(f"Amazon scraping completed: {products_added} products")
         return self.scraped_products[-products_added:]
     
-    def scrape_product_images(self, product_url, site='amazon', max_images=10):
-        """Scrape additional images from individual product page"""
+    def scrape_product_images(self, product_url, site='amazon', max_images=20):
+        """AI-Powered image scraping with 100% accuracy target"""
         try:
-            logger.info(f"Scraping images from product page: {product_url[:50]}...")
+            logger.info(f"AI-Enhanced image extraction from: {product_url[:60]}...")
             
-            # Add delay to avoid being blocked
-            time.sleep(random.uniform(1, 3))
+            # Use dynamic content loading for better results
+            if self.use_dynamic_extraction:
+                soup = self._get_dynamic_content(
+                    product_url, 
+                    wait_for_selectors=['#altImages', '.a-dynamic-image', '#landingImage'],
+                    interact_with_gallery=True
+                )
+            else:
+                # Fallback to static scraping
+                response = self.safe_request(product_url)
+                if not response or response.status_code != 200:
+                    logger.warning(f"Failed to get product page: {product_url}")
+                    return []
+                soup = BeautifulSoup(response.content, 'html.parser')
             
-            # Make request to product page
-            response = self.safe_request(product_url)
-            if not response or response.status_code != 200:
-                logger.warning(f"Failed to get product page: {product_url}")
+            if not soup:
+                logger.error("Failed to get page content")
                 return []
             
-            soup = BeautifulSoup(response.content, 'html.parser')
             images = []
             
+            # Multi-method image extraction for maximum accuracy
             if site.lower() == 'amazon':
-                images = self._extract_amazon_images(soup)
+                images = self._extract_amazon_images_ai_enhanced(soup, product_url)
             elif site.lower() == 'ebay':
-                images = self._extract_ebay_images(soup)
+                images = self._extract_ebay_images_enhanced(soup)
             elif site.lower() == 'daraz':
-                images = self._extract_daraz_images(soup)
+                images = self._extract_daraz_images_enhanced(soup)
             else:
-                images = self._extract_generic_images(soup)
+                images = self._extract_generic_images_enhanced(soup)
             
-            # Limit number of images and clean URLs
-            clean_images = []
-            for img_url in images[:max_images]:
-                if img_url and img_url.strip():
-                    # Convert relative URLs to absolute
-                    if img_url.startswith('//'):
-                        img_url = 'https:' + img_url
-                    elif img_url.startswith('/'):
-                        if 'amazon.com' in product_url:
-                            img_url = 'https://www.amazon.com' + img_url
-                        elif 'ebay.com' in product_url:
-                            img_url = 'https://www.ebay.com' + img_url
-                        elif 'daraz.pk' in product_url:
-                            img_url = 'https://www.daraz.pk' + img_url
-                    
-                    clean_images.append(img_url)
+            # AI-powered image validation and enhancement
+            validated_images = self._validate_and_enhance_images(images, max_images)
             
-            logger.info(f"Found {len(clean_images)} images for product page")
-            return clean_images
+            logger.info(f"Extracted {len(validated_images)} high-quality images")
+            return validated_images
             
         except Exception as e:
-            logger.error(f"Error scraping product images: {e}")
+            logger.error(f"Error in AI-enhanced image scraping: {e}")
             return []
     
     def _extract_amazon_images(self, soup):
-        """Extract images from Amazon product page with enhanced selectors"""
+        """Extract images from Amazon product page with enhanced 2024 selectors"""
         images = []
         
-        # Enhanced Amazon image gallery selectors for 2024
+        # Comprehensive Amazon image gallery selectors for 2024/2025
         selectors = [
-            # Main image gallery
-            '#altImages img',
-            '#landingImage',
-            '.a-dynamic-image',
-            '#imgTagWrapperId img',
-            '.a-button-selected img',
-            '[data-old-hires]',
+            # Primary gallery selectors (most effective)
+            '#altImages img',  # Thumbnail gallery
+            '#altImages .a-button-text img',  # Gallery buttons
+            '#landingImage',  # Main product image
+            '.a-dynamic-image',  # Dynamic images
+            '#imgTagWrapperId img',  # Image wrapper
             
-            # Additional selectors for different Amazon layouts
-            '.imageThumbnail img',
+            # Additional gallery selectors
+            '.imageThumbnail img',  # Thumbnail images
+            '.a-button-selected img',  # Selected gallery item
+            '[data-old-hires]',  # High-res image data
+            
+            # Modern 2024/2025 gallery selectors
+            '[data-testid="image-thumbnail"] img',
+            '[data-testid="product-images"] img',
+            '[data-testid="gallery-image"] img',
+            '.image-gallery-image img',
+            '.product-image-carousel img',
+            '.product-image-gallery img',
+            '.media-gallery img',
+            '.media-gallery-item img',
+            
+            # Carousel and slider images
             '.a-carousel-item img',
+            '.a-carousel-card img',
+            '.slider-item img',
+            '.gallery-slider img',
+            
+            # Enhanced gallery button selectors
             '.a-button-toggle img',
             '.a-button-text img',
             '[data-action="main-image-click"] img',
-            '.a-spacing-small img',
-            '.a-spacing-base img',
+            '.gallery-thumbnail img',
+            '.thumbnail-item img',
             
-            # Generic image selectors
+            # Color/variant specific images
+            '.twister-plus-content img',
+            '.variant-image img',
+            '.color-variant-image img',
+            '.size-variant-image img',
+            '[data-variant-id] img',
+            '.color-picker img',
+            '.variant-selector img',
+            
+            # Enhanced media selectors
             'img[src*="media-amazon.com"]',
             'img[data-src*="media-amazon.com"]',
-            'img[src*="amazon.com"]',
-            'img[data-src*="amazon.com"]',
+            'img[src*="amazon.com/images"]',
+            'img[data-src*="amazon.com/images"]',
+            'img[src*="ssl-images-amazon.com"]',
+            'img[data-src*="ssl-images-amazon.com"]',
+            'img[src*="m.media-amazon.com"]',
+            'img[data-src*="m.media-amazon.com"]',
             
-            # Product-specific selectors
+            # Product container images
+            '#dp-container img',
+            '#feature-bullets img',
+            '#productDetails img',
+            '.product-facts img',
+            '.product-overview img',
+            
+            # Layout-specific selectors
+            '.a-spacing-small img',
+            '.a-spacing-base img',
+            '.a-spacing-medium img',
+            
+            # Modern product page selectors
             '[data-testid="product-image"] img',
             '.product-image img',
             '.gallery-image img',
+            '.hero-image img',
+            '.main-image img',
+            '[role="img"]',
+            
+            # Fallback broader selectors
+            'img[data-a-dynamic-image]',
+            '.dp-image img',
+            '.product-photo img',
+            '.item-photo img'
         ]
         
         for selector in selectors:
             elements = soup.select(selector)
             for elem in elements:
-                # Get image URL from various attributes
+                # Enhanced image URL extraction from multiple attributes
                 img_url = (elem.get('data-old-hires') or 
                           elem.get('data-src') or 
                           elem.get('src') or 
                           elem.get('data-a-dynamic-image') or
                           elem.get('data-lazy') or
-                          elem.get('data-original'))
+                          elem.get('data-original') or
+                          elem.get('data-image-url') or
+                          elem.get('data-full-image') or
+                          elem.get('data-zoom-image'))
+                
+                # Handle dynamic image data (JSON format)
+                if not img_url and elem.get('data-a-dynamic-image'):
+                    try:
+                        dynamic_data = json.loads(elem.get('data-a-dynamic-image'))
+                        if isinstance(dynamic_data, dict):
+                            # Get the highest resolution image
+                            img_url = max(dynamic_data.keys(), key=lambda x: len(x))
+                    except:
+                        pass
                 
                 if img_url and ('http' in img_url or img_url.startswith('//')):
-                    # Clean Amazon image URL to get high resolution
-                    if '._AC_' in img_url:
-                        # Remove size restrictions for better quality
-                        img_url = re.sub(r'\._AC_[^_]+_', '._AC_SL1500_', img_url)
+                    # Convert to high-quality image
+                    high_quality_url = self._convert_to_high_quality_image(img_url)
                     
                     # Ensure HTTPS
-                    if img_url.startswith('//'):
-                        img_url = 'https:' + img_url
+                    if high_quality_url.startswith('//'):
+                        high_quality_url = 'https:' + high_quality_url
                     
-                    # Only add Amazon images
-                    if 'amazon.com' in img_url or 'media-amazon.com' in img_url:
-                        images.append(img_url)
+                    # Only add Amazon images and filter out obvious icons
+                    if ('amazon.com' in high_quality_url or 'media-amazon.com' in high_quality_url or 'ssl-images-amazon.com' in high_quality_url) and not any(icon in high_quality_url.lower() for icon in ['icon', 'logo', 'badge', 'sprite']):
+                        images.append(high_quality_url)
+        
+        # Extract images from JSON-LD structured data
+        self._extract_images_from_json_ld(soup, images)
         
         # Remove duplicates and filter out very small images
         unique_images = []
         seen_urls = set()
+        
+        logger.debug(f"Processing {len(images)} raw images for deduplication")
+        
         for img_url in images:
-            # Skip very small images (likely icons)
-            if any(size in img_url for size in ['_AC_UY10_', '_AC_UY15_', '_AC_UY20_']):
+            # Skip very small images (likely icons or thumbnails) - but be less aggressive
+            if any(size in img_url for size in ['_AC_UY10_', '_AC_UY15_', '_AC_UY20_', '_SX38_SY50_']):
                 continue
+            
+            # More sophisticated duplicate detection
+            # Extract base URL without size parameters for comparison
+            base_url = img_url.split('._')[0] if '._' in img_url else img_url.split('?')[0]
+            
+            # Allow different sizes of the same image (they might show different details)
+            # Only remove exact duplicates
             if img_url not in seen_urls:
                 unique_images.append(img_url)
                 seen_urls.add(img_url)
+                
+                # Also add the base URL to prevent very similar images
+                if base_url != img_url:
+                    seen_urls.add(base_url)
         
+        logger.info(f"Filtered {len(images)} raw images down to {len(unique_images)} unique images")
         return unique_images
+
+    def _extract_images_from_json_ld(self, soup, images):
+        """Extract images from JSON-LD structured data"""
+        try:
+            scripts = soup.find_all('script', type='application/ld+json')
+            for script in scripts:
+                try:
+                    data = json.loads(script.get_text())
+                    if isinstance(data, dict):
+                        # Look for image URLs in various JSON-LD properties
+                        image_keys = ['image', 'images', 'photo', 'thumbnail', 'logo']
+                        for key in image_keys:
+                            if key in data:
+                                img_data = data[key]
+                                if isinstance(img_data, str):
+                                    images.append(img_data)
+                                elif isinstance(img_data, list):
+                                    for img in img_data:
+                                        if isinstance(img, str):
+                                            images.append(img)
+                                        elif isinstance(img, dict) and 'url' in img:
+                                            images.append(img['url'])
+                except:
+                    continue
+        except Exception as e:
+            logger.debug(f"JSON-LD image extraction failed: {e}")
+
+    def _extract_amazon_images_ai_enhanced(self, soup, product_url):
+        """AI-Enhanced Amazon image extraction with multiple methods"""
+        images = []
+        
+        try:
+            # Method 1: JSON-LD structured data extraction
+            json_images = self._extract_images_from_json_scripts(soup)
+            images.extend(json_images)
+            logger.info(f"JSON extraction: {len(json_images)} images")
+            
+            # Method 2: Enhanced CSS selector extraction  
+            css_images = self._extract_amazon_images(soup)
+            images.extend(css_images)
+            logger.info(f"CSS extraction: {len(css_images)} images")
+            
+            # Method 3: JavaScript variable extraction
+            if self.stealth_driver:
+                js_images = self._extract_images_from_js_variables()
+                images.extend(js_images)
+                logger.info(f"JavaScript extraction: {len(js_images)} images")
+            
+        except Exception as e:
+            logger.error(f"Error in AI-enhanced Amazon image extraction: {e}")
+        
+        return images
+
+    def _extract_images_from_json_scripts(self, soup):
+        """Extract images from JSON data in script tags"""
+        images = []
+        
+        try:
+            # Amazon-specific JSON patterns
+            script_patterns = [
+                r'ImageBlockATF.*?({.*?})',
+                r'DetailPageMediaMatrix.*?({.*?})',
+                r'colorImages.*?({.*?})',
+                r'data\s*=\s*({.*?colorImages.*?})',
+                r'window\.ImageBlockATF\s*=\s*({.*?})'
+            ]
+            
+            scripts = soup.find_all('script')
+            for script in scripts:
+                if not script.string:
+                    continue
+                    
+                for pattern in script_patterns:
+                    matches = re.finditer(pattern, script.string, re.DOTALL)
+                    for match in matches:
+                        try:
+                            json_str = match.group(1)
+                            # Clean up the JSON string
+                            json_str = re.sub(r',\s*}', '}', json_str)
+                            json_str = re.sub(r',\s*]', ']', json_str)
+                            
+                            data = json.loads(json_str)
+                            
+                            # Extract images from various JSON structures
+                            extracted = self._parse_amazon_json_images(data)
+                            images.extend(extracted)
+                            
+                        except json.JSONDecodeError:
+                            continue
+                        except Exception as e:
+                            logger.debug(f"Error parsing JSON in script: {e}")
+                            continue
+            
+        except Exception as e:
+            logger.debug(f"Error extracting images from JSON scripts: {e}")
+        
+        return images
+
+    def _parse_amazon_json_images(self, data):
+        """Parse Amazon JSON data structures for images"""
+        images = []
+        
+        try:
+            if isinstance(data, dict):
+                # colorImages structure
+                if 'colorImages' in data:
+                    for color_key, color_data in data['colorImages'].items():
+                        if isinstance(color_data, list):
+                            for image_data in color_data:
+                                if isinstance(image_data, dict):
+                                    # Priority: hiRes > large > main
+                                    for key in ['hiRes', 'large', 'main']:
+                                        if key in image_data and image_data[key]:
+                                            images.append(image_data[key])
+                                            break
+                
+                # Direct image arrays
+                for key in ['images', 'imageArray', 'productImages']:
+                    if key in data and isinstance(data[key], list):
+                        for img in data[key]:
+                            if isinstance(img, str):
+                                images.append(img)
+                            elif isinstance(img, dict):
+                                for img_key in ['hiRes', 'large', 'main', 'url']:
+                                    if img_key in img and img[img_key]:
+                                        images.append(img[img_key])
+                                        break
+                        
+        except Exception as e:
+            logger.debug(f"Error parsing Amazon JSON images: {e}")
+        
+        return images
+
+    def _extract_images_from_js_variables(self):
+        """Extract images from JavaScript variables using Selenium"""
+        images = []
+        
+        try:
+            if not self.stealth_driver:
+                return images
+            
+            # Execute JavaScript to extract image data
+            js_script = """
+            var images = [];
+            
+            // Amazon-specific variables
+            if (window.ImageBlockATF) {
+                try {
+                    var data = window.ImageBlockATF;
+                    if (data.colorImages) {
+                        Object.keys(data.colorImages).forEach(function(color) {
+                            data.colorImages[color].forEach(function(img) {
+                                if (img.hiRes) images.push(img.hiRes);
+                                else if (img.large) images.push(img.large);
+                                else if (img.main) images.push(img.main);
+                            });
+                        });
+                    }
+                } catch(e) {}
+            }
+            
+            // Generic high-quality image collection
+            document.querySelectorAll('img[src*="media-amazon.com"], img[src*="ssl-images-amazon.com"]').forEach(function(img) {
+                if (img.src && img.src.length > 50 && !img.src.includes('_AC_UY20_')) {
+                    images.push(img.src);
+                }
+            });
+            
+            return [...new Set(images)]; // Remove duplicates
+            """
+            
+            result = self.stealth_driver.execute_script(js_script)
+            if result and isinstance(result, list):
+                images.extend(result)
+                
+        except Exception as e:
+            logger.debug(f"Error extracting images from JS variables: {e}")
+        
+        return images
+
+    def _validate_and_enhance_images(self, images, max_images):
+        """AI-powered image validation and enhancement"""
+        validated = []
+        seen_base_urls = set()
+        
+        for img_url in images:
+            if not img_url or not isinstance(img_url, str):
+                continue
+            
+            # Clean and enhance URL
+            enhanced_url = self._enhance_image_url(img_url)
+            if not enhanced_url:
+                continue
+            
+            # Check for duplicates using base URL
+            base_url = self._get_image_base_url(enhanced_url)
+            if base_url in seen_base_urls:
+                continue
+            
+            # Validate image quality
+            if self._is_high_quality_image(enhanced_url):
+                validated.append(enhanced_url)
+                seen_base_urls.add(base_url)
+                
+                if len(validated) >= max_images:
+                    break
+        
+        return validated
+
+    def _enhance_image_url(self, img_url):
+        """Enhance image URL for maximum quality"""
+        try:
+            if not img_url:
+                return None
+            
+            # Ensure HTTPS
+            if img_url.startswith('//'):
+                img_url = 'https:' + img_url
+            elif img_url.startswith('/'):
+                return None  # Skip relative URLs
+            
+            # Amazon image enhancement
+            if 'amazon.com' in img_url or 'media-amazon.com' in img_url:
+                # Convert to highest quality
+                if '._' in img_url:
+                    base_url = img_url.split('._')[0]
+                    img_url = base_url + '._AC_SX679_.jpg'
+                elif not any(size in img_url for size in ['_AC_SX', '_AC_SY']):
+                    # Add high quality parameters
+                    if img_url.endswith('.jpg'):
+                        img_url = img_url.replace('.jpg', '_AC_SX679_.jpg')
+            
+            return img_url
+            
+        except Exception as e:
+            logger.debug(f"Error enhancing image URL: {e}")
+            return img_url
+
+    def _get_image_base_url(self, img_url):
+        """Get base URL for duplicate detection"""
+        try:
+            if '._' in img_url:
+                return img_url.split('._')[0]
+            return img_url.split('?')[0]
+        except:
+            return img_url
+
+    def _is_high_quality_image(self, img_url):
+        """Check if image meets quality standards"""
+        try:
+            # Skip obvious low-quality indicators
+            low_quality = ['_AC_UY20_', '_AC_UY15_', '_SX38_SY50_', 'icon', 'logo', 'badge']
+            if any(indicator in img_url.lower() for indicator in low_quality):
+                return False
+            
+            # URL length as quality indicator
+            return len(img_url) > 80
+            
+        except Exception as e:
+            logger.debug(f"Error checking image quality: {e}")
+            return True
+
+    def _extract_ebay_images_enhanced(self, soup):
+        """Enhanced eBay image extraction"""
+        return self._extract_ebay_images(soup)
+
+    def _extract_daraz_images_enhanced(self, soup):
+        """Enhanced Daraz image extraction"""
+        return self._extract_daraz_images(soup)
+
+    def _extract_generic_images_enhanced(self, soup):
+        """Enhanced generic image extraction"""
+        return self._extract_generic_images(soup)
     
     def _extract_ebay_images(self, soup):
         """Extract images from eBay product page"""
@@ -1527,281 +2436,537 @@ class UniversalScraper:
             return round(price, 2)
         return 0
     
-    def extract_variants(self, soup, product_name):
-        """Extract product variants from page - Enhanced for real e-commerce sites"""
+    def extract_variants(self, soup, product_name, main_price=None):
+        """Extract REAL product variants from Amazon product page - Enhanced for 2024"""
         variants = []
         try:
-            logger.info(f"Extracting variants for: {product_name[:50]}...")
+            logger.info(f"Extracting REAL variants for: {product_name[:50]}...")
             
-            # ENHANCED VARIANT EXTRACTION (PRODUCT PAGE ONLY)
             if soup is None:
                 logger.info("No product page soup available for variants")
                 return []
 
-            # 1) AMAZON: Parse embedded JSON (more accurate) for color/size
-            try:
-                scripts = soup.find_all('script')
-                color_names = []
-                size_names = []
-                json_found = False
-                for sc in scripts:
-                    txt = sc.get_text(' ', strip=False)
-                    if not txt or 'colorToAsin' not in txt:
-                        continue
-                    json_found = True
-                    # Try to extract the JSON inside parseJSON('...') or direct JSON
-                    import re, json
-                    m = re.search(r"parseJSON\('\s*(\{.*?\})\s*'\)", txt, re.DOTALL)
-                    raw = None
-                    if m:
-                        raw = m.group(1)
-                        raw = raw.encode('utf-8').decode('unicode_escape')
-                    else:
-                        # Fallback: attempt to capture a JS object containing colorToAsin
-                        m2 = re.search(r"\{[^{}]*\"colorToAsin\"[\s\S]*?\}", txt)
-                        if m2:
-                            raw = m2.group(0)
-                    if not raw:
-                        continue
-                    try:
-                        data = json.loads(raw)
-                    except Exception:
-                        # Try to clean quotes
-                        cleaned = raw.replace('\"', '"').replace("\\'", "'")
-                        data = json.loads(cleaned)
-                    color_map = data.get('colorToAsin') or {}
-                    if isinstance(color_map, dict):
-                        color_names = list(color_map.keys())
-                    # Try to detect available dimensions for sizes
-                    visual_dims = data.get('visualDimensions') or []
-                    # If a size dropdown exists, collect from DOM below (handled later)
-                    break
-                # From DOM size dropdowns
-                size_select = soup.select('select#native_dropdown_selected_size_name option:not([value=""])')
-                if not size_select:
-                    size_select = soup.select('#variation_size_name select option:not([value=""])')
-                for opt in size_select:
-                    t = (opt.get('value') or opt.get_text(strip=True) or '').strip()
-                    if t and t.lower() not in ['select', 'please select']:
-                        size_names.append(t)
-                # De-duplicate
-                color_names = list(dict.fromkeys([c for c in color_names if c]))
-                size_names = list(dict.fromkeys([s for s in size_names if s]))
-                if color_names or size_names:
-                    if color_names and size_names:
-                        for c in color_names[:15]:
-                            for s in size_names[:15]:
-                                variants.append({
-                                    'color': c,
-                                    'size': s,
-                                    'price': None,
-                                    'stock': None,
-                                    'sku': f"COLOR-{c.replace(' ', '')}_SIZE-{s.replace(' ', '')}",
-                                    'images': []
-                                })
-                    elif color_names:
-                        for c in color_names[:20]:
-                            variants.append({
-                                'color': c,
-                                'price': None,
-                                'stock': None,
-                                'sku': f"COLOR-{c.replace(' ', '')}",
-                                'images': []
-                            })
-                    elif size_names:
-                        for s in size_names[:20]:
-                            variants.append({
-                                'size': s,
-                                'price': None,
-                                'stock': None,
-                                'sku': f"SIZE-{s.replace(' ', '')}",
-                                'images': []
-                            })
-                    # If we successfully built variants, return early for Amazon
-                    if variants:
-                        logger.info(f"Amazon JSON-based variants extracted: {len(variants)}")
-                        return variants[:40]
-            except Exception as e:
-                logger.debug(f"Amazon JSON variant parse failed: {e}")
+            # 1) AMAZON: Extract from JSON-LD structured data (most reliable)
+            variants = self._extract_variants_from_json_ld(soup, product_name)
+            if variants:
+                logger.info(f"Found {len(variants)} variants from JSON-LD data")
+                return variants[:20]  # Limit to prevent too many variants
 
-            # Prefer twister/variation blocks on Amazon product pages
-            amazon_selectors = [
-                '#twister [data-asin-variation] .a-button-text',
-                '#twister .swatchAvailable .a-button-text',
-                '#twister .a-button-toggle .a-button-text',
-                '#variation_color_name .a-button-text',
-                '#variation_size_name .a-button-text',
-                'select#native_dropdown_selected_size_name option:not([value=""])',
-                'select[name*="size"] option:not([value=""])',
-                'select[name*="color"] option:not([value=""])',
-                'input[type="radio"][name*="color"] + label',
-                'input[type="radio"][name*="size"] + label'
-            ]
+            # 2) AMAZON: Extract from variant selection interface
+            variants = self._extract_variants_from_interface(soup, product_name, main_price)
+            if variants:
+                logger.info(f"Found {len(variants)} variants from interface elements")
+                return variants[:20]
 
-            # eBay product page selectors (latest common layouts)
-            ebay_selectors = [
-                '#x-msku .select-menu option:not([value=""])',
-                '#msku-sel-1 option:not([value=""])',
-                '#msku-sel-2 option:not([value=""])',
-                '[data-testid="x-variation-select"] option:not([value=""])',
-                '[data-testid="x-variation-select"] .x-variation-select__value',
-                '[data-testid="ux-textspans-ITEM_VARIATIONS"] span',
-                '.x-variation-select .x-variation-select__menu .x-variation-select__option',
-                'select[name*="Size"] option:not([value=""])',
-                'select[name*="Color"] option:not([value=""])'
-            ]
-            
-            all_variants = []
-            # Try Amazon then eBay selectors; this is harmless across sites due to low overlap
-            for selector in amazon_selectors + ebay_selectors:
-                elements = soup.select(selector)
-                for elem in elements:
-                    variant_text = (elem.get('value') or elem.get_text(strip=True) or '').strip()
-                    if not variant_text:
-                        continue
-                    vt = variant_text.lower()
-                    # Denylist generic UI texts often seen on Amazon pages
-                    deny = ['select', 'choose', 'please select', 'size', 'color', 'option', 'go', 'see options', 'add to cart', 'sort by']
-                    if any(d in vt for d in deny):
-                        continue
-                    if 1 < len(variant_text) < 50:
-                        all_variants.append(variant_text)
-            
-            # Remove duplicates and filter
-            unique_variants = list(dict.fromkeys(all_variants))
-            logger.info(f"Found {len(unique_variants)} potential variants: {unique_variants[:5]}")
-            
-            # Generate realistic variants based on product type and found options
-            base_price = random.uniform(29, 599)  # More realistic price range
-            
-            # ELECTRONICS - Most common variants
-            if any(word in product_name.lower() for word in ['phone', 'tablet', 'laptop', 'computer', 'gaming', 'console', 'xbox', 'playstation']):
-                # Electronics typically have storage/memory variants
-                storage_options = ['64GB', '128GB', '256GB', '512GB', '1TB']
-                color_options = ['Black', 'White', 'Silver', 'Space Gray', 'Blue']
-                
-                # Use found variants or defaults
-                if unique_variants:
-                    # Use real variants found on page
-                    for variant in unique_variants[:4]:
-                        if any(storage in variant for storage in ['GB', 'TB']):
-                            variants.append({
-                                'storage': variant,
-                                'price': round(base_price * random.uniform(0.95, 1.3), 2),
-                                'stock': random.randint(5, 25),
-                                'sku': f"STORAGE-{variant.replace(' ', '')}",
-                                'images': []
-                            })
-                        elif any(color in variant.lower() for color in ['black', 'white', 'blue', 'red', 'gray', 'silver']):
-                            variants.append({
-                                'color': variant,
-                                'price': round(base_price * random.uniform(0.98, 1.1), 2),
-                                'stock': random.randint(8, 30),
-                                'sku': f"COLOR-{variant.replace(' ', '')}",
-                                'images': []
-                            })
-                        else:
-                            variants.append({
-                                'variant': variant,
-                                'price': round(base_price * random.uniform(0.95, 1.15), 2),
-                                'stock': random.randint(5, 20),
-                                'sku': f"VAR-{variant.replace(' ', '')}",
-                                'images': []
-                            })
-                else:
-                    # Create default storage variants for electronics
-                    for storage in storage_options[:3]:
-                        variants.append({
-                            'storage': storage,
-                            'price': round(base_price * (1 + len(storage)/200), 2),
-                            'stock': random.randint(5, 25),
-                            'sku': f"STORAGE-{storage}",
-                            'images': []
-                        })
-            
-            # CLOTHING - Size and color variants
-            elif any(word in product_name.lower() for word in ['shirt', 'dress', 'clothing', 'jacket', 'pants', 'jeans', 'shoes']):
-                size_options = ['S', 'M', 'L', 'XL', 'XXL']
-                color_options = ['Black', 'White', 'Blue', 'Red', 'Gray', 'Navy']
-                
-                if unique_variants:
-                    for variant in unique_variants[:4]:
-                        if variant.upper() in ['S', 'M', 'L', 'XL', 'XXL'] or any(size in variant for size in size_options):
-                            variants.append({
-                                'size': variant,
-                                'price': round(base_price * random.uniform(0.95, 1.05), 2),
-                                'stock': random.randint(10, 40),
-                                'sku': f"SIZE-{variant}",
-                                'images': []
-                            })
-                        else:
-                            variants.append({
-                                'color': variant,
-                                'price': round(base_price * random.uniform(0.98, 1.08), 2),
-                                'stock': random.randint(8, 35),
-                                'sku': f"COLOR-{variant.replace(' ', '')}",
-                                'images': []
-                            })
-                else:
-                    for size in size_options[:3]:
-                        variants.append({
-                            'size': size,
-                            'price': round(base_price * random.uniform(0.95, 1.1), 2),
-                            'stock': random.randint(10, 40),
-                            'sku': f"SIZE-{size}",
-                            'images': []
-                        })
-            
-            # HOME & KITCHEN - Capacity/size variants
-            elif any(word in product_name.lower() for word in ['kitchen', 'home', 'appliance', 'tool', 'bottle', 'cup']):
-                capacity_options = ['Small', 'Medium', 'Large', '500ml', '1L', '2L']
-                
-                if unique_variants:
-                    for variant in unique_variants[:3]:
-                        variants.append({
-                            'capacity': variant,
-                            'price': round(base_price * random.uniform(0.9, 1.2), 2),
-                            'stock': random.randint(5, 20),
-                            'sku': f"CAP-{variant.replace(' ', '')}",
-                            'images': []
-                        })
-                else:
-                    for capacity in capacity_options[:2]:
-                        variants.append({
-                            'capacity': capacity,
-                            'price': round(base_price * random.uniform(0.9, 1.15), 2),
-                            'stock': random.randint(5, 20),
-                            'sku': f"CAP-{capacity}",
-                            'images': []
-                        })
-            
-            # DEFAULT - Create generic variants for any other product
-            else:
-                if unique_variants:
-                    for variant in unique_variants[:3]:
-                        variants.append({
-                            'option': variant,
-                            'price': round(base_price * random.uniform(0.95, 1.15), 2),
-                            'stock': random.randint(5, 25),
-                            'sku': f"OPT-{variant.replace(' ', '')}",
-                            'images': []
-                        })
-                else:
-                    # Create default variants based on product type
-                    variants.append({
-                        'standard': 'Standard',
-                        'price': base_price,
-                        'stock': random.randint(10, 30),
-                        'sku': 'STD-001',
-                        'images': []
-                    })
-            
-            logger.info(f"Generated {len(variants)} variants for product")
-            
+            # 3) AMAZON: Extract from dropdown menus and selection buttons
+            variants = self._extract_variants_from_dropdowns(soup, product_name)
+            if variants:
+                logger.info(f"Found {len(variants)} variants from dropdowns")
+                return variants[:20]
+
+            logger.info("No real variants found - product may not have variants")
+            return []
+
         except Exception as e:
             logger.error(f"Error extracting variants: {e}")
+            return []
+
+    def _extract_variants_from_json_ld(self, soup, product_name):
+        """Extract variants from JSON-LD structured data"""
+        variants = []
+        try:
+            # Look for JSON-LD scripts containing product data
+            scripts = soup.find_all('script', type='application/ld+json')
+            for script in scripts:
+                try:
+                    data = json.loads(script.get_text())
+                    if isinstance(data, dict) and 'offers' in data:
+                        offers = data.get('offers', [])
+                        if isinstance(offers, list):
+                            for offer in offers:
+                                if 'itemOffered' in offer and 'hasVariant' in offer['itemOffered']:
+                                    variant_data = offer['itemOffered']['hasVariant']
+                                    if isinstance(variant_data, list):
+                                        for variant in variant_data:
+                                            variant_info = self._parse_variant_from_json(variant)
+                                            if variant_info:
+                                                variants.append(variant_info)
+                except (json.JSONDecodeError, KeyError):
+                    continue
+        except Exception as e:
+                logger.debug(f"JSON-LD variant extraction failed: {e}")
+        return variants
+
+    def _extract_variants_from_interface(self, soup, product_name, main_price=None):
+        """Extract variants from Amazon's variant selection interface with pricing"""
+        variants = []
+        try:
+            # Enhanced variant extraction with pricing and stock information
+            # Updated selectors for 2024 Amazon structure
+            variant_containers = soup.select('#variation_color_name, #variation_size_name, #variation_storage_name, #twister, [data-testid*="variation"], .a-popover-trigger, [id*="variation"], [class*="twister"]')
+            
+            # Also check for modern Amazon variant containers
+            modern_variant_selectors = [
+                '[data-a-popover*="variation"]',
+                '[data-variant-chooser]',
+                '.twister-plus-content',
+                '.twister-content',
+                '.a-declarative[data-action*="variant"]',
+                '[id*="twister"] .a-button-group',
+                '.size-button-content',
+                '.color-button-content',
+                '[data-dp-url*="variant"]'
+            ]
+            
+            for selector in modern_variant_selectors:
+                containers = soup.select(selector)
+                variant_containers.extend(containers)
+            
+            for container in variant_containers:
+                container_id = container.get('id', '')
+                container_class = container.get('class', [])
+                
+                # Extract variant buttons with multiple selector strategies
+                variant_buttons = []
+                
+                # Classic button selectors
+                classic_buttons = container.select('.a-button-text, .a-button-toggle .a-button-text, .swatchAvailable .a-button-text')
+                variant_buttons.extend(classic_buttons)
+                
+                # Modern variant button selectors (2024)
+                modern_selectors = [
+                    '.twister-plus-content .a-button',
+                    '[data-variant-id] .a-button-text',
+                    '.size-button .a-button-text',
+                    '.color-button .a-button-text',
+                    '.twister-content .a-button-text',
+                    '[data-a-popover] .a-button-text',
+                    '.a-declarative .a-button-text',
+                    '.variation-button .a-button-text'
+                ]
+                
+                for selector in modern_selectors:
+                    buttons = container.select(selector)
+                    variant_buttons.extend(buttons)
+                
+                # Extract variants with pricing from each button
+                for button in variant_buttons:
+                    variant_text = button.get_text(strip=True)
+                    if not variant_text or len(variant_text) < 2:
+                        continue
+                    
+                    # Skip generic UI text and common Amazon interface elements
+                    skip_texts = [
+                        'select', 'choose', 'color', 'size', 'storage', 'option', 'click to select', 
+                        'select an option', 'update page', 'currently unavailable', 'see all options',
+                        'view all', 'more options', 'loading', 'please wait', 'add to cart',
+                        'buy now', 'quantity', 'qty', 'delivery', 'ship to', 'location'
+                    ]
+                    if variant_text.lower() in skip_texts:
+                        continue
+                    
+                    # Skip if it contains common UI keywords
+                    ui_keywords = ['update', 'page', 'loading', 'wait', 'cart', 'buy', 'ship', 'delivery']
+                    if any(keyword in variant_text.lower() for keyword in ui_keywords):
+                        continue
+                    
+                    # Try to extract price from the button or nearby elements
+                    variant_price = self._extract_variant_price(button, container)
+                    
+                    # If no variant-specific price found, use main product price as fallback
+                    if not variant_price and main_price:
+                        variant_price = main_price
+                        logger.debug(f"Using main price ${main_price} for variant '{variant_text}'")
+                    
+                    # Try to extract stock information
+                    variant_stock = self._extract_variant_stock(button, container)
+                    
+                    # Try to extract variant-specific images
+                    variant_images = self._extract_variant_images_from_button(button, container)
+                    
+                    # Enhanced variant type detection
+                    variant_type = self._detect_variant_type(container_id, container_class, variant_text)
+                    
+                    variant = {
+                        variant_type: variant_text,
+                        'price': variant_price,
+                        'stock': variant_stock,
+                        'sku': f"{variant_type.upper()}-{variant_text.replace(' ', '').replace('+', '').replace('-', '')[:15]}",
+                        'images': variant_images,
+                        'attributes': {
+                            variant_type: variant_text
+                        }
+                    }
+                    
+                    # Avoid duplicates
+                    if not any(v.get(variant_type) == variant_text for v in variants):
+                        variants.append(variant)
+            
+            # Extract from option tables (like Apple Studio Display configurations)
+            self._extract_variants_from_option_tables(soup, variants)
+                        
+        except Exception as e:
+            logger.debug(f"Interface variant extraction failed: {e}")
+        return variants
+
+    def _extract_variant_price(self, button, container):
+        """Extract price for a specific variant with enhanced 2024 selectors"""
+        try:
+            # Enhanced price selectors for modern Amazon pages
+            price_selectors = [
+                # Classic price selectors
+                '.a-price .a-offscreen',
+                '.a-price-whole',
+                '.a-price-current .a-offscreen',
+                '.a-price-current .a-price-whole',
+                
+                # Modern price selectors (2024)
+                '[data-testid="price"] .a-offscreen',
+                '.twister-plus-buying-options .a-price .a-offscreen',
+                '.buying-option .a-price .a-offscreen',
+                '.option-price',
+                '.variant-price',
+                '.config-price',
+                '[aria-label*="price"]',
+                '[data-price]',
+                '.price-display'
+            ]
+            
+            # Look for price in the button itself first
+            for selector in price_selectors:
+                price_elem = button.select_one(selector)
+                if price_elem:
+                    price_text = price_elem.get_text(strip=True)
+                    if price_text and any(symbol in price_text for symbol in ['$', '€', '£', '¥', '₹']):
+                        price = self.extract_price(price_text)
+                        if price and price > 0:
+                            return price
+            
+            # Look in the container
+            for selector in price_selectors:
+                price_elem = container.select_one(selector)
+                if price_elem:
+                    price_text = price_elem.get_text(strip=True)
+                    if price_text and any(symbol in price_text for symbol in ['$', '€', '£', '¥', '₹']):
+                        price = self.extract_price(price_text)
+                        if price and price > 0:
+                            return price
+            
+            # Look for price in sibling elements
+            parent = button.parent
+            if parent:
+                for selector in price_selectors:
+                    price_elem = parent.select_one(selector)
+                    if price_elem:
+                        price_text = price_elem.get_text(strip=True)
+                        if price_text and any(symbol in price_text for symbol in ['$', '€', '£', '¥', '₹']):
+                            price = self.extract_price(price_text)
+                            if price and price > 0:
+                                return price
+            
+            # Look for price in data attributes
+            price_data_attrs = ['data-price', 'data-variant-price', 'data-cost']
+            for attr in price_data_attrs:
+                price_value = button.get(attr) or container.get(attr)
+                if price_value:
+                    price = self.extract_price(str(price_value))
+                    if price and price > 0:
+                        return price
+                        
+            return None
+        except Exception as e:
+            logger.debug(f"Variant price extraction failed: {e}")
+            return None
+
+    def _extract_variant_stock(self, button, container):
+        """Extract stock information for a specific variant"""
+        try:
+            # Look for stock indicators
+            stock_indicators = [
+                '.a-color-success',  # In stock
+                '.a-color-price',    # Price available
+                '.a-color-base',     # Available
+                '[data-availability]'
+            ]
+            
+            for selector in stock_indicators:
+                stock_elem = button.select_one(selector) or container.select_one(selector)
+                if stock_elem:
+                    stock_text = stock_elem.get_text(strip=True).lower()
+                    if 'in stock' in stock_text or 'available' in stock_text:
+                        return random.randint(5, 50)  # Random stock for available items
+                    elif 'out of stock' in stock_text or 'unavailable' in stock_text:
+                        return 0
+            return None
+        except Exception as e:
+            logger.debug(f"Variant stock extraction failed: {e}")
+            return None
+
+    def _extract_variant_images_from_button(self, button, container):
+        """Extract variant-specific images with high quality"""
+        try:
+            images = []
+            
+            # Look for images in the button and container
+            img_elements = (button.select('img') if button else []) + (container.select('img') if container else [])
+            
+            for img_elem in img_elements:
+                # Try multiple image source attributes
+                img_src = (img_elem.get('src') or 
+                          img_elem.get('data-src') or 
+                          img_elem.get('data-lazy') or
+                          img_elem.get('data-original'))
+                
+                if img_src and 'amazon' in img_src.lower():
+                    # Convert small thumbnail images to high-quality versions
+                    high_quality_src = self._convert_to_high_quality_image(img_src)
+                    if high_quality_src and high_quality_src not in images:
+                        images.append(high_quality_src)
+            
+            # If no images found, try to extract from data attributes
+            if not images:
+                images = self._extract_variant_images_from_data(button, container)
+            
+            return images
+        except Exception as e:
+            logger.debug(f"Variant image extraction failed: {e}")
+            return []
+
+    def _convert_to_high_quality_image(self, img_url):
+        """Convert small Amazon thumbnail to high-quality image"""
+        try:
+            if not img_url or 'amazon' not in img_url.lower():
+                return img_url
+            
+            # Amazon image URL patterns to convert to high quality
+            # Small thumbnails: _SX38_SY50_ -> _AC_SX679_
+            # Medium images: _AC_UY218_ -> _AC_SX679_
+            # Large images: _AC_SX679_ (already high quality)
+            
+            # Remove size constraints and add high-quality parameters
+            if '_SX38_SY50_' in img_url:
+                # Convert small thumbnails to high quality
+                high_quality_url = img_url.replace('_SX38_SY50_', '_AC_SX679_')
+            elif '_AC_UY218_' in img_url:
+                # Convert medium images to high quality
+                high_quality_url = img_url.replace('_AC_UY218_', '_AC_SX679_')
+            elif '_AC_UY436_' in img_url:
+                # Convert medium images to high quality
+                high_quality_url = img_url.replace('_AC_UY436_', '_AC_SX679_')
+            elif '_AC_UY654_' in img_url:
+                # Convert large images to high quality
+                high_quality_url = img_url.replace('_AC_UY654_', '_AC_SX679_')
+            elif '_AC_SX679_' in img_url:
+                # Already high quality
+                high_quality_url = img_url
+            else:
+                # Add high quality parameters if none exist
+                if '_AC_' not in img_url:
+                    # Insert high quality parameters before file extension
+                    if img_url.endswith('.jpg'):
+                        high_quality_url = img_url.replace('.jpg', '_AC_SX679_.jpg')
+                    elif img_url.endswith('.png'):
+                        high_quality_url = img_url.replace('.png', '_AC_SX679_.png')
+                    else:
+                        high_quality_url = img_url
+                else:
+                    high_quality_url = img_url
+            
+            logger.debug(f"Converted image: {img_url[:50]}... -> {high_quality_url[:50]}...")
+            return high_quality_url
+            
+        except Exception as e:
+            logger.debug(f"Image quality conversion failed: {e}")
+            return img_url
+
+    def _extract_variant_images_from_data(self, button, container):
+        """Extract variant images from data attributes"""
+        try:
+            images = []
+            
+            # Look for data attributes that might contain image URLs
+            elements_to_check = []
+            if button:
+                elements_to_check.append(button)
+            if container:
+                elements_to_check.extend(container.find_all(['div', 'span', 'img']))
+            
+            for elem in elements_to_check:
+                # Check various data attributes
+                for attr in ['data-image', 'data-src', 'data-lazy', 'data-original', 'data-hires']:
+                    img_url = elem.get(attr)
+                    if img_url and 'amazon' in img_url.lower():
+                        high_quality_url = self._convert_to_high_quality_image(img_url)
+                        if high_quality_url and high_quality_url not in images:
+                            images.append(high_quality_url)
+            
+            return images
+        except Exception as e:
+            logger.debug(f"Data attribute image extraction failed: {e}")
+            return []
+
+    def _extract_variants_from_dropdowns(self, soup, product_name):
+        """Extract variants from dropdown menus"""
+        variants = []
+        try:
+            # Find all select elements that might contain variants
+            select_elements = soup.find_all('select')
+            for select in select_elements:
+                select_name = select.get('name', '').lower()
+                select_id = select.get('id', '').lower()
+                
+                # Skip if it's not a variant selector
+                if not any(keyword in select_name + select_id for keyword in ['color', 'size', 'storage', 'memory', 'variant', 'option']):
+                    continue
+                
+                options = select.find_all('option')
+                for option in options:
+                    option_value = option.get('value', '').strip()
+                    option_text = option.get_text(strip=True)
+                    
+                    if not option_value or option_value in ['', 'select', 'choose']:
+                        continue
+                    
+                    # Determine variant type based on select element
+                    variant_type = 'option'
+                    if 'color' in select_name or 'color' in select_id:
+                        variant_type = 'color'
+                    elif 'size' in select_name or 'size' in select_id:
+                        variant_type = 'size'
+                    elif 'storage' in select_name or 'memory' in select_name or 'storage' in select_id:
+                        variant_type = 'storage'
+                    
+                    variant = {
+                        variant_type: option_text or option_value,
+                        'price': None,
+                        'stock': None,
+                        'sku': f"{variant_type.upper()}-{option_value.replace(' ', '')}",
+                        'images': []
+                    }
+                    variants.append(variant)
+                    
+        except Exception as e:
+            logger.debug(f"Dropdown variant extraction failed: {e}")
+        return variants
+
+    def _detect_variant_type(self, container_id, container_class, variant_text):
+        """Enhanced variant type detection"""
+        container_info = (container_id + ' ' + ' '.join(container_class)).lower()
+        text_lower = variant_text.lower()
         
-        return variants[:6]
+        # Detect by container clues
+        if any(word in container_info for word in ['color', 'colour']):
+            return 'color'
+        elif any(word in container_info for word in ['size', 'capacity', 'memory', 'storage', 'gb', 'tb']):
+            return 'size'
+        elif any(word in container_info for word in ['storage', 'memory', 'disk', 'ssd', 'hdd']):
+            return 'storage'
+        elif any(word in container_info for word in ['material', 'finish', 'texture']):
+            return 'material'
+        elif any(word in container_info for word in ['stand', 'mount', 'adapter']):
+            return 'stand'
+        elif any(word in container_info for word in ['glass', 'screen', 'display']):
+            return 'glass'
+        elif any(word in container_info for word in ['care', 'warranty', 'protection']):
+            return 'protection'
+        
+        # Detect by variant text content
+        if any(word in text_lower for word in ['gb', 'tb', 'mb']):
+            return 'storage'
+        elif any(word in text_lower for word in ['inch', 'cm', 'mm', 'small', 'medium', 'large', 'xl', 'xs']):
+            return 'size'
+        elif any(word in text_lower for word in ['red', 'blue', 'green', 'black', 'white', 'silver', 'gold', 'pink', 'purple', 'yellow', 'orange', 'gray', 'grey']):
+            return 'color'
+        elif any(word in text_lower for word in ['stand', 'mount', 'adapter', 'adjustable', 'tilt', 'height']):
+            return 'stand'
+        elif any(word in text_lower for word in ['glass', 'texture', 'standard', 'nano']):
+            return 'glass'
+        elif any(word in text_lower for word in ['care', 'warranty', 'protection', 'years']):
+            return 'protection'
+        
+        return 'option'
+
+    def _extract_variants_from_option_tables(self, soup, variants):
+        """Extract variants from option/configuration tables (like Apple Studio Display)"""
+        try:
+            # Look for configuration tables or option groups
+            config_selectors = [
+                '.twister-plus-buying-options',
+                '.twister-dim-content',
+                '[data-test-id="buying-options"]',
+                '.buying-options-table',
+                '.configuration-table',
+                '.option-table',
+                '.variant-table'
+            ]
+            
+            for selector in config_selectors:
+                tables = soup.select(selector)
+                for table in tables:
+                    # Extract options from table rows or option blocks
+                    options = table.select('.a-button-group .a-button, .option-row, .config-option, .buying-option')
+                    
+                    for option in options:
+                        option_text = option.get_text(strip=True)
+                        if not option_text or len(option_text) < 3:
+                            continue
+                        
+                        # Skip generic text
+                        if option_text.lower() in ['select', 'choose', 'option', 'configuration']:
+                            continue
+                        
+                        # Try to extract price from the option
+                        price_elem = option.select_one('.a-price .a-offscreen, .price, .cost')
+                        option_price = None
+                        if price_elem:
+                            price_text = price_elem.get_text(strip=True)
+                            option_price = self.extract_price(price_text)
+                        
+                        # Determine variant type based on content
+                        variant_type = self._detect_variant_type('', [], option_text)
+                        
+                        variant = {
+                            variant_type: option_text,
+                            'price': option_price,
+                            'stock': 'available',
+                            'sku': f"{variant_type.upper()}-{option_text.replace(' ', '').replace('+', '').replace('-', '')[:15]}",
+                            'images': [],
+                            'attributes': {
+                                variant_type: option_text
+                            }
+                        }
+                        
+                        # Avoid duplicates
+                        if not any(v.get(variant_type) == option_text for v in variants):
+                            variants.append(variant)
+                            
+        except Exception as e:
+            logger.debug(f"Option table variant extraction failed: {e}")
+
+    def _parse_variant_from_json(self, variant_data):
+        """Parse variant information from JSON data"""
+        try:
+            variant = {}
+            if 'name' in variant_data:
+                variant['name'] = variant_data['name']
+            if 'color' in variant_data:
+                variant['color'] = variant_data['color']
+            if 'size' in variant_data:
+                variant['size'] = variant_data['size']
+            if 'storage' in variant_data:
+                variant['storage'] = variant_data['storage']
+            if 'price' in variant_data:
+                variant['price'] = variant_data['price']
+            if 'sku' in variant_data:
+                variant['sku'] = variant_data['sku']
+            else:
+                variant['sku'] = f"VAR-{hash(str(variant_data)) % 10000}"
+            variant['stock'] = None
+            variant['images'] = []
+            return variant
+        except Exception as e:
+            logger.debug(f"JSON variant parsing failed: {e}")
+            return None
 
     def _extract_variant_images(self, soup, product_name):
         """Extract variant-specific images from product page"""
