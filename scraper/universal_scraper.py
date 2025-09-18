@@ -276,16 +276,18 @@ class UniversalScraper:
             # Advanced stealth options
             options = uc.ChromeOptions()
             
-            # Stealth settings
+            # Stealth settings - Updated for newer Chrome versions
             options.add_argument('--no-sandbox')
             options.add_argument('--disable-dev-shm-usage')
             options.add_argument('--disable-blink-features=AutomationControlled')
-            options.add_experimental_option("excludeSwitches", ["enable-automation"])
-            options.add_experimental_option('useAutomationExtension', False)
             options.add_argument('--disable-extensions')
             options.add_argument('--disable-plugins-discovery')
             options.add_argument('--disable-web-security')
             options.add_argument('--allow-running-insecure-content')
+            options.add_argument('--disable-automation')
+            options.add_argument('--disable-infobars')
+            options.add_argument('--disable-notifications')
+            options.add_argument('--disable-popup-blocking')
             
             # Performance optimization
             options.add_argument('--disable-images')  # We'll load images separately
@@ -302,8 +304,61 @@ class UniversalScraper:
             ]
             options.add_argument(f'--user-agent={random.choice(user_agents)}')
             
-            # Create undetected driver
-            self.stealth_driver = uc.Chrome(options=options, version_main=None)
+            # Create undetected driver with better error handling and version matching
+            try:
+                # Try to get Chrome version and match ChromeDriver
+                import subprocess
+                import re
+                
+                # Get Chrome version
+                chrome_version = None
+                try:
+                    # Try Windows registry method
+                    result = subprocess.run([
+                        'reg', 'query', 
+                        'HKEY_CURRENT_USER\\Software\\Google\\Chrome\\BLBeacon', 
+                        '/v', 'version'
+                    ], capture_output=True, text=True, timeout=10)
+                    
+                    if result.returncode == 0:
+                        version_match = re.search(r'version\s+REG_SZ\s+(\d+)\.', result.stdout)
+                        if version_match:
+                            chrome_version = int(version_match.group(1))
+                            logger.info(f"Detected Chrome version: {chrome_version}")
+                except Exception as e:
+                    logger.debug(f"Could not detect Chrome version: {e}")
+                
+                # Create driver with version matching
+                if chrome_version:
+                    self.stealth_driver = uc.Chrome(options=options, version_main=chrome_version)
+                else:
+                    # Let undetected-chromedriver auto-detect
+                    self.stealth_driver = uc.Chrome(options=options, version_main=None)
+                    
+            except Exception as driver_error:
+                logger.warning(f"Failed to create undetected Chrome driver: {driver_error}")
+                # Fallback to regular Chrome driver
+                try:
+                    from selenium.webdriver.chrome.service import Service
+                    from selenium.webdriver.chrome.options import Options as ChromeOptions
+                    from webdriver_manager.chrome import ChromeDriverManager
+                    
+                    chrome_options = ChromeOptions()
+                    chrome_options.add_argument('--no-sandbox')
+                    chrome_options.add_argument('--disable-dev-shm-usage')
+                    chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+                    chrome_options.add_argument('--disable-extensions')
+                    chrome_options.add_argument('--disable-automation')
+                    chrome_options.add_argument('--disable-infobars')
+                    chrome_options.add_argument(f'--user-agent={random.choice(user_agents)}')
+                    
+                    # Use webdriver-manager to automatically download matching ChromeDriver
+                    service = Service(ChromeDriverManager().install())
+                    self.stealth_driver = webdriver.Chrome(service=service, options=chrome_options)
+                    logger.info("Fallback to regular Chrome driver with webdriver-manager successful")
+                except Exception as fallback_error:
+                    logger.error(f"Fallback Chrome driver also failed: {fallback_error}")
+                    return False
             
             # Execute stealth script
             self.stealth_driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
