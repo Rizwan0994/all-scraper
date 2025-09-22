@@ -4,9 +4,26 @@
 // Initialize WebSocket connection
 const socket = io();
 
-// Global variables for filtering
+// Global variables for filtering and pagination
 let allProducts = [];
 let filteredProducts = [];
+
+// Pagination variables
+let currentPage = 1;
+let productsPerPage = 50; // Default products per page
+let totalPages = 0;
+let totalProducts = 0;
+let isLoading = false;
+
+// Chunk-based pagination state
+let paginationState = {
+    currentPage: 1,
+    perPage: 50,
+    totalProducts: 0,
+    totalPages: 0,
+    hasMore: false,
+    isLoading: false
+};
 
 // Initialize when DOM is loaded
 document.addEventListener('DOMContentLoaded', function() {
@@ -443,6 +460,8 @@ function applyFilters() {
         return categoryMatch && subcategoryMatch && siteMatch && priceMatch;
     });
     
+    // Reset to first page when applying filters
+    currentPage = 1;
     displayProducts(filteredProducts);
 }
 
@@ -474,10 +493,19 @@ function populateFilters(products) {
 }
 
 function displayProducts(products) {
+    // Update total pages based on filtered products
+    totalPages = Math.ceil(products.length / productsPerPage);
+    
     if (products.length === 0) {
         document.getElementById('products-table').innerHTML = '<p>No products found matching the filters.</p>';
+        hidePaginationControls();
         return;
     }
+    
+    // Calculate pagination
+    const startIndex = (currentPage - 1) * productsPerPage;
+    const endIndex = Math.min(startIndex + productsPerPage, products.length);
+    const paginatedProducts = products.slice(startIndex, endIndex);
     
     const tableHtml = `
         <div class="table-responsive">
@@ -490,10 +518,13 @@ function displayProducts(products) {
                         <th>Price</th>
                         <th>Site</th>
                         <th>Rating</th>
+                        <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody>
-                    ${products.map(p => `
+                    ${paginatedProducts.map((p, index) => {
+                        const globalIndex = (currentPage - 1) * productsPerPage + index;
+                        return `
                         <tr>
                             <td>${p.title.substring(0, 60)}...</td>
                             <td><span class="badge bg-secondary">${p.category || 'N/A'}</span></td>
@@ -501,15 +532,23 @@ function displayProducts(products) {
                             <td>$${p.price > 0 ? p.price.toFixed(2) : '0.00'}</td>
                             <td><span class="badge bg-primary">${p.source_site}</span></td>
                             <td>${p.rating ? p.rating.toFixed(1) : 'N/A'}</td>
+                            <td>
+                                <button class="btn btn-sm btn-outline-info" onclick="showProductDetails(${globalIndex})" title="View Details">
+                                    <i class="fas fa-eye"></i>
+                                </button>
+                            </td>
                         </tr>
-                    `).join('')}
+                    `}).join('')}
                 </tbody>
             </table>
-            <p class="text-muted">Showing ${products.length} of ${allProducts.length} products</p>
         </div>
     `;
     
     document.getElementById('products-table').innerHTML = tableHtml;
+    
+    // Update pagination controls
+    updatePaginationControls(products.length, startIndex + 1, endIndex);
+    showPaginationControls();
 }
 
 function exportFilteredProducts() {
@@ -791,4 +830,449 @@ function updateProductCount(count) {
     countElements.forEach(element => {
         element.textContent = count;
     });
+}
+
+// ==================== PAGINATION FUNCTIONS ====================
+
+function updatePaginationControls(totalItems, startItem, endItem) {
+    // Update pagination info
+    document.getElementById('start-item').textContent = startItem;
+    document.getElementById('end-item').textContent = endItem;
+    document.getElementById('total-items').textContent = totalItems;
+    
+    // Update page jump input max value
+    document.getElementById('page-jump').max = totalPages;
+    
+    // Generate pagination buttons
+    generatePaginationButtons();
+}
+
+function generatePaginationButtons() {
+    const paginationNav = document.getElementById('pagination-nav');
+    if (!paginationNav) return;
+    
+    let buttonsHtml = '';
+    
+    // Previous button
+    const prevDisabled = currentPage <= 1 ? 'disabled' : '';
+    buttonsHtml += `
+        <li class="page-item ${prevDisabled}">
+            <a class="page-link" href="javascript:void(0)" onclick="goToPreviousPage()">
+                <i class="fas fa-chevron-left"></i> Previous
+            </a>
+        </li>
+    `;
+    
+    // Page numbers
+    const maxVisiblePages = 5;
+    let startPage = Math.max(1, currentPage - Math.floor(maxVisiblePages / 2));
+    let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
+    
+    // Adjust start page if we're near the end
+    if (endPage - startPage < maxVisiblePages - 1) {
+        startPage = Math.max(1, endPage - maxVisiblePages + 1);
+    }
+    
+    // First page button
+    if (startPage > 1) {
+        buttonsHtml += `
+            <li class="page-item">
+                <a class="page-link" href="javascript:void(0)" onclick="goToPage(1)">1</a>
+            </li>
+        `;
+        if (startPage > 2) {
+            buttonsHtml += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+        }
+    }
+    
+    // Page number buttons
+    for (let i = startPage; i <= endPage; i++) {
+        const activeClass = i === currentPage ? 'active' : '';
+        buttonsHtml += `
+            <li class="page-item ${activeClass}">
+                <a class="page-link" href="javascript:void(0)" onclick="goToPage(${i})">${i}</a>
+            </li>
+        `;
+    }
+    
+    // Last page button
+    if (endPage < totalPages) {
+        if (endPage < totalPages - 1) {
+            buttonsHtml += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+        }
+        buttonsHtml += `
+            <li class="page-item">
+                <a class="page-link" href="javascript:void(0)" onclick="goToPage(${totalPages})">${totalPages}</a>
+            </li>
+        `;
+    }
+    
+    // Next button
+    const nextDisabled = currentPage >= totalPages ? 'disabled' : '';
+    buttonsHtml += `
+        <li class="page-item ${nextDisabled}">
+            <a class="page-link" href="javascript:void(0)" onclick="goToNextPage()">
+                Next <i class="fas fa-chevron-right"></i>
+            </a>
+        </li>
+    `;
+    
+    paginationNav.innerHTML = buttonsHtml;
+}
+
+function goToPage(page) {
+    if (page < 1 || page > totalPages) return;
+    currentPage = page;
+    displayProducts(filteredProducts);
+}
+
+function goToNextPage() {
+    if (currentPage < totalPages) {
+        currentPage++;
+        displayProducts(filteredProducts);
+    }
+}
+
+function goToPreviousPage() {
+    if (currentPage > 1) {
+        currentPage--;
+        displayProducts(filteredProducts);
+    }
+}
+
+function jumpToPage() {
+    const pageInput = document.getElementById('page-jump');
+    const page = parseInt(pageInput.value);
+    
+    if (page && page >= 1 && page <= totalPages) {
+        goToPage(page);
+        pageInput.value = ''; // Clear input after jump
+    } else {
+        alert(`Please enter a valid page number between 1 and ${totalPages}`);
+    }
+}
+
+function changeProductsPerPage() {
+    const newProductsPerPage = parseInt(document.getElementById('productsPerPageSelect').value);
+    if (newProductsPerPage !== productsPerPage) {
+        productsPerPage = newProductsPerPage;
+        currentPage = 1; // Reset to first page when changing page size
+        displayProducts(filteredProducts);
+    }
+}
+
+function showPaginationControls() {
+    const controls = document.getElementById('pagination-controls');
+    if (controls && totalPages > 1) {
+        controls.style.display = 'flex';
+    }
+}
+
+function hidePaginationControls() {
+    const controls = document.getElementById('pagination-controls');
+    if (controls) {
+        controls.style.display = 'none';
+    }
+}
+
+// ==================== PRODUCT DETAIL FUNCTIONS ====================
+
+let currentProductDetail = null;
+
+function ensureModalExists() {
+    // Check if modal exists, if not, create it dynamically
+    let modal = document.getElementById('productDetailModal');
+    if (!modal) {
+        console.log('Creating product detail modal dynamically...');
+        const modalHTML = `
+            <div class="modal fade" id="productDetailModal" tabindex="-1" aria-labelledby="productDetailModalLabel" aria-hidden="true">
+                <div class="modal-dialog modal-lg modal-dialog-scrollable">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title" id="productDetailModalLabel">Product Details</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="row mb-3">
+                                <div class="col-md-4">
+                                    <img id="productDetailImage" src="" alt="Product Image" class="img-fluid rounded" style="max-width: 100%; height: auto;">
+                                </div>
+                                <div class="col-md-8">
+                                    <h6 id="productDetailTitle" class="fw-bold mb-2"></h6>
+                                    <p class="mb-1"><strong>Price:</strong> <span id="productDetailPrice"></span></p>
+                                    <p class="mb-1"><strong>Site:</strong> <span id="productDetailSite"></span></p>
+                                    <p class="mb-1"><strong>Rating:</strong> <span id="productDetailRating"></span></p>
+                                    <p class="mb-1"><strong>Category:</strong> <span id="productDetailCategory"></span></p>
+                                    <p class="mb-1"><strong>Stock:</strong> <span id="productDetailStock"></span></p>
+                                </div>
+                            </div>
+                            
+                            <div id="productVariantsSection" style="display: none;">
+                                <h6 class="fw-bold mb-2">Product Variants</h6>
+                                <div id="productVariants" class="mb-3"></div>
+                            </div>
+                            
+                            <div id="productImagesSection" style="display: none;">
+                                <h6 class="fw-bold mb-2">Additional Images</h6>
+                                <div id="productImages" class="row mb-3"></div>
+                            </div>
+                            
+                            <div class="mt-3">
+                                <h6 class="fw-bold mb-2">Raw JSON Data</h6>
+                                <div class="bg-light p-3 rounded">
+                                    <pre id="productDetailJSON" class="mb-0" style="font-size: 12px; max-height: 400px; overflow-y: auto;"></pre>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" onclick="copyProductJSON()">
+                                <i class="fas fa-copy"></i> Copy JSON
+                            </button>
+                            <button type="button" class="btn btn-primary" onclick="downloadProductJSON()">
+                                <i class="fas fa-download"></i> Download JSON
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        // Add modal to body
+        document.body.insertAdjacentHTML('beforeend', modalHTML);
+        modal = document.getElementById('productDetailModal');
+    }
+    return modal;
+}
+
+function showProductDetails(productIndex) {
+    console.log('showProductDetails called with index:', productIndex);
+    
+    // Ensure DOM is ready
+    if (document.readyState !== 'complete') {
+        console.log('DOM not ready, waiting...');
+        setTimeout(() => showProductDetails(productIndex), 100);
+        return;
+    }
+    
+    // Ensure modal exists
+    ensureModalExists();
+    
+    // Get the product from filteredProducts array using the global index
+    const product = filteredProducts[productIndex];
+    if (!product) {
+        alert('Product not found!');
+        console.error('Product not found at index:', productIndex);
+        return;
+    }
+    
+    console.log('Product found:', product.title);
+    currentProductDetail = product;
+    
+    // Get modal elements (they should exist now)
+    const elements = {
+        title: document.getElementById('productDetailTitle'),
+        price: document.getElementById('productDetailPrice'),
+        site: document.getElementById('productDetailSite'),
+        rating: document.getElementById('productDetailRating'),
+        category: document.getElementById('productDetailCategory'),
+        stock: document.getElementById('productDetailStock')
+    };
+    
+    // Double-check for missing elements
+    for (const [key, element] of Object.entries(elements)) {
+        if (!element) {
+            console.error(`Element still not found after ensuring modal exists: productDetail${key.charAt(0).toUpperCase() + key.slice(1)}`);
+            alert('Modal elements could not be created. Please refresh the page and try again.');
+            return;
+        }
+    }
+    
+    // Populate modal with product data
+    elements.title.textContent = product.title || 'N/A';
+    elements.price.textContent = product.price > 0 ? `$${product.price.toFixed(2)}` : 'N/A';
+    elements.site.textContent = product.source_site || 'N/A';
+    elements.rating.textContent = product.rating ? `${product.rating}/5` : 'N/A';
+    elements.category.textContent = `${product.category || 'N/A'} > ${product.sub_category || 'N/A'}`;
+    elements.stock.textContent = product.current_stock || 'N/A';
+    
+    // Set main product image
+    const imageElement = document.getElementById('productDetailImage');
+    if (imageElement) {
+        const mainImage = product.main_image_url || (product.additional_images && product.additional_images[0]) || '/static/images/placeholder.jpg';
+        imageElement.src = mainImage;
+        imageElement.onerror = function() {
+            this.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZGRkIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtc2l6ZT0iMTQiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGR5PSIuM2VtIiBmaWxsPSIjOTk5Ij5ObyBJbWFnZTwvdGV4dD48L3N2Zz4=';
+        };
+    }
+    
+    // Show/hide variants section
+    const variantsSection = document.getElementById('productVariantsSection');
+    if (variantsSection) {
+        if (product.variants && product.variants.length > 0) {
+            populateVariants(product.variants);
+            variantsSection.style.display = 'block';
+        } else {
+            variantsSection.style.display = 'none';
+        }
+    }
+    
+    // Show/hide additional images section
+    const imagesSection = document.getElementById('productImagesSection');
+    if (imagesSection) {
+        if (product.additional_images && product.additional_images.length > 0) {
+            populateAdditionalImages(product.additional_images);
+            imagesSection.style.display = 'block';
+        } else {
+            imagesSection.style.display = 'none';
+        }
+    }
+    
+    // Show raw JSON data
+    const jsonElement = document.getElementById('productDetailJSON');
+    if (jsonElement) {
+        jsonElement.textContent = JSON.stringify(product, null, 2);
+    }
+    
+    // Show the modal
+    const modalElement = document.getElementById('productDetailModal');
+    if (modalElement) {
+        const modal = new bootstrap.Modal(modalElement);
+        modal.show();
+    } else {
+        console.error('Modal element not found');
+        alert('Product detail modal not found. Please refresh the page and try again.');
+    }
+}
+
+function populateVariants(variants) {
+    const variantsContainer = document.getElementById('productVariants');
+    if (!variantsContainer) {
+        console.error('Variants container not found');
+        return;
+    }
+    
+    const variantsHtml = variants.map((variant, index) => {
+        const variantKeys = Object.keys(variant).filter(key => 
+            !['price', 'stock', 'sku', 'images', 'attributes'].includes(key)
+        );
+        
+        const variantType = variantKeys[0] || 'variant';
+        const variantValue = variant[variantType] || 'N/A';
+        
+        return `
+            <div class="variant-card variant-item mb-2">
+                <div class="card-body p-3">
+                    <div class="row align-items-center">
+                        <div class="col-md-3">
+                            <strong class="text-primary">${variantType.charAt(0).toUpperCase() + variantType.slice(1)}:</strong><br>
+                            <span class="text-dark">${variantValue}</span>
+                        </div>
+                        <div class="col-md-2">
+                            <small><strong>Price:</strong><br>$${variant.price ? variant.price.toFixed(2) : '0.00'}</small>
+                        </div>
+                        <div class="col-md-2">
+                            <small><strong>Stock:</strong><br>${variant.stock || 'N/A'}</small>
+                        </div>
+                        <div class="col-md-2">
+                            <small><strong>SKU:</strong><br><code style="font-size: 10px;">${variant.sku || 'N/A'}</code></small>
+                        </div>
+                        <div class="col-md-3 text-center">
+                            ${variant.images && variant.images.length > 0 ? 
+                                `<img src="${variant.images[0]}" alt="Variant Image" class="img-thumbnail" 
+                                     style="width: 50px; height: 50px; object-fit: cover; cursor: pointer;" 
+                                     onclick="showImageModal('${variant.images[0]}')">` : 
+                                '<div class="text-muted" style="font-size: 12px;"><i class="fas fa-image"></i><br>No image</div>'
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+    
+    variantsContainer.innerHTML = variantsHtml;
+}
+
+function populateAdditionalImages(images) {
+    const imagesContainer = document.getElementById('productImages');
+    if (!imagesContainer) {
+        console.error('Images container not found');
+        return;
+    }
+    
+    const imagesHtml = images.map((imageUrl, index) => `
+        <div class="col-md-3 col-sm-4 col-6 mb-2">
+            <img src="${imageUrl}" alt="Product Image ${index + 1}" class="img-thumbnail w-100" 
+                 style="height: 120px; object-fit: cover; cursor: pointer;" 
+                 onclick="showImageModal('${imageUrl}')">
+        </div>
+    `).join('');
+    
+    imagesContainer.innerHTML = imagesHtml;
+}
+
+function showImageModal(imageUrl) {
+    // Create a simple image modal
+    const modal = document.createElement('div');
+    modal.className = 'modal fade';
+    modal.innerHTML = `
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Product Image</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body text-center">
+                    <img src="${imageUrl}" alt="Product Image" class="img-fluid">
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    const imageModal = new bootstrap.Modal(modal);
+    imageModal.show();
+    
+    // Remove modal from DOM when hidden
+    modal.addEventListener('hidden.bs.modal', function() {
+        document.body.removeChild(modal);
+    });
+}
+
+function copyProductJSON() {
+    if (!currentProductDetail) return;
+    
+    const jsonText = JSON.stringify(currentProductDetail, null, 2);
+    
+    // Create a temporary textarea to copy the text
+    const textarea = document.createElement('textarea');
+    textarea.value = jsonText;
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand('copy');
+    document.body.removeChild(textarea);
+    
+    // Show success message
+    showAlert('Product JSON copied to clipboard!', 'success');
+}
+
+function downloadProductJSON() {
+    if (!currentProductDetail) return;
+    
+    const jsonText = JSON.stringify(currentProductDetail, null, 2);
+    const blob = new Blob([jsonText], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `product_${currentProductDetail.title ? currentProductDetail.title.replace(/[^a-zA-Z0-9]/g, '_') : 'unknown'}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    URL.revokeObjectURL(url);
+    
+    // Show success message
+    showAlert('Product JSON downloaded successfully!', 'success');
 }

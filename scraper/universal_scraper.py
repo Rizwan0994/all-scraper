@@ -29,6 +29,10 @@ except ImportError:
 
 import cloudscraper
 
+# Import chunk manager
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from chunk_manager import ChunkManager
+
 # Undetected Chrome driver
 try:
     import undetected_chromedriver as uc
@@ -198,6 +202,10 @@ class UniversalScraper:
         self.socketio = socketio
         self.scraped_products = []
         self.scraped_urls = set()  # For deduplication
+        
+        # Initialize chunk manager for efficient data handling
+        self.chunk_manager = ChunkManager()
+        self.chunk_manager.initialize_from_existing()
         self.current_stats = {
             'total_products': 0,
             'site_breakdown': {},
@@ -831,7 +839,7 @@ class UniversalScraper:
         return None
     
     def _find_amazon_products(self, soup):
-        """Find Amazon product items using enhanced 2024 selectors"""
+        """Find Amazon product items using enhanced 2024 selectors with duplicate prevention"""
         # Priority order of selectors for 2024 Amazon structure
         selectors = [
             # Primary selectors for search results
@@ -852,11 +860,23 @@ class UniversalScraper:
         ]
         
         items = []
+        seen_asins = set()  # Track ASINs to prevent duplicates
+        
         for selector in selectors:
-            items = soup.select(selector)[:30]
-            if items:
-                logger.info(f"Found {len(items)} products using selector: {selector}")
-                break
+            found_items = soup.select(selector)
+            if found_items:
+                # Filter out duplicates based on ASIN
+                unique_items = []
+                for item in found_items:
+                    asin = item.get('data-asin', '')
+                    if asin and asin not in seen_asins:
+                        seen_asins.add(asin)
+                        unique_items.append(item)
+                
+                items = unique_items[:30]  # Limit to 30 unique products
+                if items:
+                    logger.info(f"Found {len(items)} unique products using selector: {selector}")
+                    break
         
         if not items:
             # Debug: Log some HTML content to see what we're getting
@@ -1307,6 +1327,9 @@ class UniversalScraper:
                 logger.warning(f"Amazon: No items found for '{keyword}'")
                 continue
             
+            # Track processed ASINs to prevent duplicates
+            processed_asins = set()
+            
             for i, item in enumerate(items):
                 # Check if user requested to stop
                 if self.check_stop_condition():
@@ -1315,6 +1338,13 @@ class UniversalScraper:
                     
                 if products_added >= max_products:
                     break
+                
+                # Get ASIN to prevent duplicates
+                asin = item.get('data-asin', '')
+                if asin in processed_asins:
+                    logger.info(f"Skipping duplicate ASIN: {asin}")
+                    continue
+                processed_asins.add(asin)
                     
                 try:
                     # Enhanced title extraction using 2024 selectors
@@ -1361,11 +1391,18 @@ class UniversalScraper:
                     # Generate SKU
                     sku = f"AMZ-{keyword[:3].upper()}-{i+1:04d}"
                     
-                    # Extract variants from PRODUCT PAGE, not search results
-                    product_page_response = None
+                    # Extract variants from PRODUCT PAGE using Selenium for JavaScript content
                     product_soup = None
                     try:
-                        if product_url:
+                        if product_url and hasattr(self, 'stealth_driver') and self.stealth_driver:
+                            logger.info(f"Using Selenium to get product page: {product_url[:60]}...")
+                            self.stealth_driver.get(product_url)
+                            time.sleep(3)  # Wait for page to load and JavaScript to execute
+                            product_soup = BeautifulSoup(self.stealth_driver.page_source, 'html.parser')
+                            logger.info(f"Got product page with Selenium: {len(self.stealth_driver.page_source)} characters")
+                        elif product_url:
+                            # Fallback to safe_request if Selenium is not available
+                            logger.info(f"Using safe_request fallback for product page: {product_url[:60]}...")
                             product_page_response = self.safe_request(product_url)
                             if product_page_response and product_page_response.status_code == 200:
                                 product_soup = BeautifulSoup(product_page_response.content, 'html.parser')
@@ -1373,7 +1410,7 @@ class UniversalScraper:
                         logger.warning(f"Failed to fetch product page for variants: {e}")
 
                     # Extract variants if available (prefer product_soup) with main price fallback
-                    variants = self.extract_variants(product_soup or soup, title, main_price=price)
+                    variants = self._extract_variants_enhanced_2024(product_soup or soup, title, main_price=price)
                     
                     # Extract structured data for enhanced accuracy
                     structured_data = self._extract_structured_data(product_soup or soup, title)
@@ -2258,15 +2295,31 @@ class UniversalScraper:
         return all_products
     
     def add_product(self, product):
-        """Add a product to the collection with deduplication and real-time updates"""
-        # Check for duplicates based on source URL
-        if product.source_url in self.scraped_urls:
-            logger.info(f"Duplicate product skipped: {product.product_name[:50]}...")
+        """Add a product to the collection with enhanced deduplication and real-time updates"""
+        # Enhanced duplicate checking - multiple criteria
+        if not product or not product.source_url:
+            logger.warning("Invalid product data - skipping")
             return False
+            
+        # Check for duplicates based on multiple criteria
+        product_key = product.source_url.strip()
+        product_name_key = product.product_name.strip().lower()
+        
+        # Check URL duplicates
+        if product_key in self.scraped_urls:
+            logger.info(f"Duplicate URL skipped: {product.product_name[:50]}...")
+            return False
+            
+        # Check for similar product names (fuzzy matching)
+        for existing_product in self.scraped_products:
+            if (existing_product.product_name.strip().lower() == product_name_key and 
+                existing_product.source_site == product.source_site):
+                logger.info(f"Duplicate product name skipped: {product.product_name[:50]}...")
+                return False
         
         # Add to collections
         self.scraped_products.append(product)
-        self.scraped_urls.add(product.source_url)
+        self.scraped_urls.add(product_key)
         
         # Update current stats
         self.current_stats['total_products'] = len(self.scraped_products)
@@ -2799,7 +2852,7 @@ class UniversalScraper:
         return 0
     
     def extract_variants(self, soup, product_name, main_price=None):
-        """Extract REAL product variants from Amazon product page - Enhanced for 2024"""
+        """Extract REAL product variants - Comprehensive 2024 Amazon Support"""
         variants = []
         try:
             logger.info(f"Extracting REAL variants for: {product_name[:50]}...")
@@ -2807,6 +2860,122 @@ class UniversalScraper:
             if soup is None:
                 logger.info("No product page soup available for variants")
                 return []
+
+            # Enhanced page content validation
+            page_text = soup.get_text()
+            if len(page_text) < 10000:
+                logger.warning("Page appears to be minimal HTML - variants may require JavaScript")
+                if hasattr(self, 'stealth_driver') and self.stealth_driver:
+                    logger.info("Re-extracting page content with full JavaScript execution...")
+                    try:
+                        soup = BeautifulSoup(self.stealth_driver.page_source, 'html.parser')
+                        page_text = soup.get_text()
+                        logger.info(f"Re-extracted page: {len(page_text)} characters")
+                    except Exception as e:
+                        logger.warning(f"Could not re-extract page: {e}")
+
+            # Use the enhanced variant extraction method that actually works
+            enhanced_variants = self._extract_variants_enhanced_2024(soup, product_name, main_price)
+            if enhanced_variants:
+                logger.info(f"Found {len(enhanced_variants)} variants using enhanced method")
+                variants.extend(enhanced_variants)
+                return variants  # Return early since enhanced method works
+
+            # Fallback to individual methods if enhanced method doesn't work
+            # 1) PRIORITY: Extract Storage/Memory variants (most reliable)
+            storage_variants = self._extract_storage_variants_2024(soup, product_name, main_price)
+            if storage_variants:
+                logger.info(f"Found {len(storage_variants)} storage variants")
+                variants.extend(storage_variants)
+
+            # 2) PRIORITY: Extract Color variants (often missed)
+            color_variants = self._extract_color_variants_2024(soup, product_name, main_price)
+            if color_variants:
+                logger.info(f"Found {len(color_variants)} color variants")
+                variants.extend(color_variants)
+
+            # 3) PRIORITY: Extract Size variants
+            size_variants = self._extract_size_variants_2024(soup, product_name, main_price)
+            if size_variants:
+                logger.info(f"Found {len(size_variants)} size variants")
+                variants.extend(size_variants)
+
+            # 4) Extract Style/Model variants
+            style_variants = self._extract_style_variants_2024(soup, product_name, main_price)
+            if style_variants:
+                logger.info(f"Found {len(style_variants)} style variants")
+                variants.extend(style_variants)
+
+            # 5) Fallback: Try JSON-LD structured data
+            if not variants:
+                variants = self._extract_variants_from_json_ld(soup, product_name)
+                if variants:
+                    logger.info(f"Found {len(variants)} variants from JSON-LD data")
+
+            # Clean and validate all variants
+            clean_variants = self._clean_and_validate_variants(variants)
+            
+            if clean_variants:
+                logger.info(f"Final clean variants: {len(clean_variants)}")
+                return clean_variants[:20]  # Reasonable limit
+            else:
+                logger.info("No real variants found - product may not have variants")
+                return []
+
+        except Exception as e:
+            logger.error(f"Error extracting variants: {e}")
+            return []
+
+            # NEW 2024: Check if we have stealth driver HTML vs static HTML
+            page_text = soup.get_text()
+            if len(page_text) < 10000:  # Too small, likely minimal HTML
+                logger.warning("Page appears to be minimal HTML - variants may require JavaScript")
+                if hasattr(self, 'stealth_driver') and self.stealth_driver:
+                    logger.info("Re-extracting page content with full JavaScript execution...")
+                    try:
+                        # Re-get the page source after full loading
+                        soup = BeautifulSoup(self.stealth_driver.page_source, 'html.parser')
+                        page_text = soup.get_text()
+                        logger.info(f"Re-extracted page: {len(page_text)} characters")
+                    except Exception as e:
+                        logger.warning(f"Could not re-extract page: {e}")
+
+            # 1) AMAZON: Extract from JSON-LD structured data (most reliable)
+            variants = self._extract_variants_from_json_ld(soup, product_name)
+            if variants:
+                logger.info(f"Found {len(variants)} variants from JSON-LD data")
+                return variants[:20]  # Limit to prevent too many variants
+
+            # 2) AMAZON: Extract from variant selection interface
+            variants = self._extract_variants_from_interface(soup, product_name, main_price)
+            if variants:
+                logger.info(f"Found {len(variants)} variants from interface elements")
+                return variants[:20]
+
+            # 3) AMAZON: Extract from dropdown menus and selection buttons
+            variants = self._extract_variants_from_dropdowns(soup, product_name, main_price)
+            if variants:
+                logger.info(f"Found {len(variants)} variants from dropdowns")
+                return variants[:20]
+            
+            # 4) NEW 2024: Extract from modern Amazon structures
+            variants = self._extract_variants_modern_2024(soup, product_name, main_price)
+            if variants:
+                logger.info(f"Found {len(variants)} variants from modern 2024 selectors")
+                return variants[:20]
+
+            # 5) NEW 2024: Extract from URL patterns and data attributes
+            variants = self._extract_variants_from_data_attributes(soup, product_name, main_price)
+            if variants:
+                logger.info(f"Found {len(variants)} variants from data attributes")
+                return variants[:20]
+
+            logger.info("No real variants found - product may not have variants")
+            return []
+
+        except Exception as e:
+            logger.error(f"Error extracting variants: {e}")
+            return []
 
             # 1) AMAZON: Extract from JSON-LD structured data (most reliable)
             variants = self._extract_variants_from_json_ld(soup, product_name)
@@ -3708,10 +3877,16 @@ class UniversalScraper:
 
     
     def save_products_periodically(self):
-        """Save products periodically to prevent data loss"""
+        """Save products periodically using chunk manager"""
         if len(self.scraped_products) % 5 == 0 and self.scraped_products:
             try:
-                # Save to persistent JSON file
+                # Get new products that haven't been saved to chunks yet
+                new_products = [asdict(p) for p in self.scraped_products[-5:]]  # Last 5 products
+                
+                # Add to chunk manager
+                self.chunk_manager.add_products(new_products)
+                
+                # Also maintain the legacy JSON file for backwards compatibility
                 json_file = "scraped_data/products.json"
                 with open(json_file, 'w', encoding='utf-8') as f:
                     json.dump([asdict(p) for p in self.scraped_products], f, indent=2, ensure_ascii=False)
@@ -3725,7 +3900,7 @@ class UniversalScraper:
                         for product in self.scraped_products:
                             writer.writerow(asdict(product))
                 
-                logger.info(f"Products saved to persistent files: {json_file}, {csv_file}")
+                logger.info(f"Products saved to chunks and persistent files: {json_file}, {csv_file}")
             except Exception as e:
                 logger.error(f"Failed to save products: {e}")
     
@@ -4446,22 +4621,156 @@ class UniversalScraper:
         
         return saved_files
     
+    
+    def reset_scraping_session(self):
+        """Reset the scraping session to prevent cross-session duplicates"""
+        self.scraped_urls.clear()
+        logger.info("Scraping session reset - cleared scraped URLs")
+    
+    def get_scraping_stats(self):
+        """Get current scraping statistics"""
+        return {
+            'total_products': len(self.scraped_products),
+            'unique_urls': len(self.scraped_urls),
+            'site_breakdown': self.current_stats.get('site_breakdown', {}),
+            'current_status': self.current_stats.get('current_status', 'Ready')
+        }
+
+    
+    def _extract_variants_enhanced_2024(self, soup, product_name, main_price=None):
+        """Enhanced variant extraction for 2024 Amazon"""
+        variants = []
+        try:
+            logger.info(f"Enhanced variant extraction for: {product_name[:50]}...")
+            
+            if soup is None:
+                return []
+            
+            # Method 1: Modern Amazon variant containers
+            modern_selectors = [
+                '[data-cy="color-picker"]',
+                '[data-testid="variant-color"]',
+                '[data-testid="variant-size"]',
+                '[data-testid="variant-storage"]',
+                '.a-button-toggle-group',
+                '.a-button-group',
+                '[role="radiogroup"]',
+                '.variation-container',
+                '#variation_color_name',
+                '#variation_size_name',
+                '#variation_storage_name'
+            ]
+            
+            for selector in modern_selectors:
+                containers = soup.select(selector)
+                if containers:
+                    logger.info(f"Found variant container: {selector}")
+                    variants.extend(self._extract_from_container(containers[0], main_price))
+            
+            # Method 2: Dropdown variants
+            dropdowns = soup.select('select[name*="variation"], select[id*="variation"]')
+            for dropdown in dropdowns:
+                options = dropdown.select('option')
+                for option in options:
+                    option_text = option.get_text(strip=True)
+                    if option_text and option_text not in ['Select', 'Choose', 'Size', 'Color']:
+                        variant = {
+                            'option': option_text,
+                            'price': main_price or 0.0,
+                            'stock': 50,
+                            'sku': f"VAR-{hash(option_text) % 10000:04d}",
+                            'images': [],
+                            'attributes': {'option': option_text}
+                        }
+                        variants.append(variant)
+            
+            # Method 3: Button variants
+            buttons = soup.select('.a-button-toggle[data-action="a-dropdown-button"], .a-button[data-action="a-dropdown-button"]')
+            for button in buttons:
+                button_text = button.get_text(strip=True)
+                if button_text and len(button_text) > 1:
+                    variant = {
+                        'option': button_text,
+                        'price': main_price or 0.0,
+                        'stock': 50,
+                        'sku': f"VAR-{hash(button_text) % 10000:04d}",
+                        'images': [],
+                        'attributes': {'option': button_text}
+                    }
+                    variants.append(variant)
+            
+            # Method 4: Color variants from images
+            color_images = soup.select('[data-dp-url*="color_name"] img, .color-picker img')
+            for img in color_images:
+                alt_text = img.get('alt', '')
+                if alt_text and len(alt_text) > 1:
+                    variant = {
+                        'color': alt_text,
+                        'price': main_price or 0.0,
+                        'stock': 50,
+                        'sku': f"COLOR-{hash(alt_text) % 10000:04d}",
+                        'images': [img.get('src', '')],
+                        'attributes': {'color': alt_text}
+                    }
+                    variants.append(variant)
+            
+            # Remove duplicates
+            unique_variants = []
+            seen_variants = set()
+            for variant in variants:
+                variant_key = f"{variant.get('color', '')}_{variant.get('option', '')}"
+                if variant_key not in seen_variants and variant_key.strip():
+                    seen_variants.add(variant_key)
+                    unique_variants.append(variant)
+            
+            logger.info(f"Found {len(unique_variants)} unique variants")
+            return unique_variants
+            
+        except Exception as e:
+            logger.error(f"Error in enhanced variant extraction: {e}")
+            return []
+    
+    def _extract_from_container(self, container, main_price=None):
+        """Extract variants from a container element"""
+        variants = []
+        try:
+            buttons = container.select('button, .a-button, .a-button-toggle, [role="radio"]')
+            for button in buttons:
+                variant_text = button.get_text(strip=True)
+                if variant_text and len(variant_text) > 1:
+                    variant = {
+                        'option': variant_text,
+                        'price': main_price or 0.0,
+                        'stock': 50,
+                        'sku': f"VAR-{hash(variant_text) % 10000:04d}",
+                        'images': [],
+                        'attributes': {'option': variant_text}
+                    }
+                    variants.append(variant)
+        except Exception as e:
+            logger.error(f"Error extracting from container: {e}")
+        return variants
+
     def cleanup(self):
         """Cleanup and save data when scraper is stopped"""
         try:
             if self.scraped_products:
                 logger.info("Saving data before cleanup...")
                 self.save_products_periodically()
+                # Force save any pending products in chunk manager
+                self.chunk_manager.force_save()
                 logger.info(f"Cleanup completed. {len(self.scraped_products)} products saved.")
         except Exception as e:
             logger.error(f"Error during cleanup: {e}")
     
     def force_save(self):
-        """Force save current data to persistent files"""
+        """Force save current data to persistent files and chunks"""
         try:
             if self.scraped_products:
                 logger.info("Force saving current data...")
                 self.save_products_periodically()
+                # Force save any pending products in chunk manager
+                self.chunk_manager.force_save()
                 return True
             else:
                 logger.info("No products to save")
@@ -4473,3 +4782,680 @@ class UniversalScraper:
     def __del__(self):
         """Destructor to ensure data is saved when scraper is destroyed"""
         self.cleanup()
+
+    def _extract_variants_modern_2024(self, soup, product_name, main_price=None):
+        """Extract variants using 2024 Amazon selectors"""
+        variants = []
+        try:
+            logger.info("Trying modern 2024 Amazon variant selectors...")
+            
+            # Modern Amazon uses these patterns (updated for 2024)
+            modern_selectors = [
+                # Color/Style variants
+                '[data-cy="color-picker"]',
+                '[data-testid="variant-color"]',
+                '.s-color-swatch-outer-circle',
+                '.ColorPicker__container',
+                '.swatches-container',
+                '[role="radiogroup"] [role="radio"]',
+                
+                # Size variants  
+                '[data-cy="size-picker"]',
+                '[data-testid="variant-size"]',
+                '.size-dropdown',
+                '.SizePicker__container',
+                
+                # Generic variant containers
+                '[data-hook="variant-picker"]',
+                '[data-feature-name*="variant"]',
+                '[data-component="variant-picker"]',
+                '.variant-selection',
+                '.product-variants',
+                
+                # Button-based variants
+                '.variation-selector button',
+                '.variant-button',
+                '.option-button',
+                '[class*="variant"][class*="button"]',
+                
+                # Dropdown-based variants  
+                '.variant-dropdown select',
+                '.product-option select',
+                'select[data-variant]',
+                
+                # Amazon Fresh/Prime specific
+                '[data-testid*="option"]',
+                '[data-cy*="option"]',
+                '.product-detail-option',
+                
+                # Mobile/responsive variants
+                '.mobile-variant-picker',
+                '.responsive-variant-selector'
+            ]
+            
+            for selector in modern_selectors:
+                elements = soup.select(selector)
+                if elements:
+                    logger.info(f"Found {len(elements)} elements with selector: {selector}")
+                    
+                    for element in elements:
+                        # Extract variant info from element
+                        variant_info = self._parse_variant_element_2024(element, selector)
+                        if variant_info:
+                            variants.append(variant_info)
+                            if len(variants) >= 10:  # Limit per selector
+                                break
+                    
+                    if variants:
+                        break  # Found variants, no need to try other selectors
+            
+            return variants
+            
+        except Exception as e:
+            logger.error(f"Error in modern variant extraction: {e}")
+            return []
+    
+    def _extract_variants_from_data_attributes(self, soup, product_name, main_price=None):
+        """Extract variants from data attributes and URL patterns"""
+        variants = []
+        try:
+            logger.info("Trying data attribute variant extraction...")
+            
+            # Look for elements with variant-related data attributes
+            data_selectors = [
+                '[data-asin]',
+                '[data-variant-asin]', 
+                '[data-color]',
+                '[data-size]',
+                '[data-style]',
+                '[data-option]',
+                '[data-value]',
+                '[href*="/dp/"]',
+                '[data-dp-url]',
+                '[data-substitute-asin]'
+            ]
+            
+            for selector in data_selectors:
+                elements = soup.select(selector)
+                for element in elements:
+                    # Check if element has variant indicators
+                    attrs = element.attrs
+                    variant_data = {}
+                    
+                    # Extract variant attributes
+                    for attr, value in attrs.items():
+                        if any(keyword in attr.lower() for keyword in ['color', 'size', 'style', 'variant', 'option']):
+                            variant_data[attr] = value
+                    
+                    # Extract from href if it's a link
+                    href = element.get('href', '')
+                    if '/dp/' in href and href != '':
+                        asin_match = re.search(r'/dp/([A-Z0-9]{10})', href)
+                        if asin_match:
+                            variant_data['asin'] = asin_match.group(1)
+                    
+                    # Extract text content
+                    text = element.get_text(strip=True)
+                    if text and len(text) < 100:  # Reasonable variant text length
+                        variant_data['text'] = text
+                    
+                    # If we found variant data, create variant
+                    if variant_data and len(variant_data) > 1:
+                        variant = self._create_variant_from_data_2024(variant_data, element, main_price)
+                        if variant:
+                            variants.append(variant)
+                    
+                    if len(variants) >= 20:  # Reasonable limit
+                        break
+                
+                if variants:
+                    break  # Found variants, stop looking
+            
+            return variants
+            
+        except Exception as e:
+            logger.error(f"Error in data attribute variant extraction: {e}")
+            return []
+    
+    def _parse_variant_element_2024(self, element, selector):
+        """Parse a variant element to extract variant information"""
+        try:
+            variant_info = {}
+            
+            # Extract text content
+            text = element.get_text(strip=True)
+            if text:
+                variant_info['text'] = text
+            
+            # Extract relevant attributes
+            attrs = element.attrs
+            for attr, value in attrs.items():
+                if any(keyword in attr.lower() for keyword in ['color', 'size', 'style', 'variant', 'data-', 'value']):
+                    variant_info[attr] = value
+            
+            # Extract price if available
+            price_elements = element.select('.price, .a-price, [class*="price"]')
+            for price_elem in price_elements:
+                price_text = price_elem.get_text(strip=True)
+                price_match = re.search(r'\$([0-9,]+\.?[0-9]*)', price_text)
+                if price_match:
+                    variant_info['price'] = float(price_match.group(1).replace(',', ''))
+                    break
+            
+            # Extract image if available
+            img_elements = element.select('img')
+            for img in img_elements:
+                src = img.get('src') or img.get('data-src')
+                if src and 'amazon.com' in src:
+                    variant_info['image'] = src
+                    break
+            
+            # Only return if we have meaningful data
+            if len(variant_info) > 1 and variant_info.get('text'):
+                return variant_info
+            
+            return None
+            
+        except Exception as e:
+            logger.debug(f"Error parsing variant element: {e}")
+            return None
+    
+    def _create_variant_from_data_2024(self, variant_data, element, main_price):
+        """Create a variant object from extracted data"""
+        try:
+            variant = {}
+            
+            # Determine variant type and value
+            variant_type = None
+            variant_value = variant_data.get('text', '')
+            
+            # Determine variant type from data
+            for attr, value in variant_data.items():
+                if 'color' in attr.lower():
+                    variant_type = 'color'
+                    variant_value = value
+                    break
+                elif 'size' in attr.lower():
+                    variant_type = 'size'  
+                    variant_value = value
+                    break
+                elif 'style' in attr.lower():
+                    variant_type = 'style'
+                    variant_value = value
+                    break
+            
+            if not variant_type:
+                variant_type = 'option'  # Generic option
+            
+            # Build variant object
+            variant[variant_type] = variant_value
+            variant['price'] = variant_data.get('price', main_price or 0)
+            variant['stock'] = 10  # Default stock
+            variant['sku'] = f"{variant_type.upper()}-{variant_value}".replace(' ', '')
+            
+            # Add image if available
+            if variant_data.get('image'):
+                variant['images'] = [variant_data['image']]
+            
+            # Add attributes
+            variant['attributes'] = {variant_type: variant_value}
+            
+            return variant
+            
+        except Exception as e:
+            logger.debug(f"Error creating variant: {e}")
+            return None
+    
+
+
+    def _extract_storage_variants_2024(self, soup, product_name, main_price=None):
+        """Extract storage/memory variants with high precision"""
+        variants = []
+        try:
+            logger.debug("Extracting storage variants...")
+            
+            # Specific storage/memory selectors (high precision)
+            storage_selectors = [
+                # Dropdown storage options
+                'select[data-a-popover*="size_name"] option',
+                'select[name*="size_name"] option',
+                'select[name*="storage"] option',
+                'select[name*="memory"] option',
+                'select[name*="capacity"] option',
+                
+                # Button storage options
+                '.size-button-group button',
+                '[data-dp-url*="size_name"] button',
+                '.size-picker button',
+                '[role="radiogroup"][aria-label*="size" i] [role="radio"]',
+                '[role="radiogroup"][aria-label*="storage" i] [role="radio"]',
+                '[role="radiogroup"][aria-label*="memory" i] [role="radio"]',
+                
+                # Specific Amazon storage containers
+                '#size_name .a-dropdown-container option',
+                '#variation_size_name .a-dropdown-container option',
+                '.twister-size-selection option',
+                
+                # Modern storage selectors
+                '[data-csa-c-element-id*="size"] button',
+                '[data-action*="size_name"] button'
+            ]
+            
+            for selector in storage_selectors:
+                elements = soup.select(selector)
+                if elements:
+                    logger.debug(f"Checking {len(elements)} elements with storage selector: {selector}")
+                    
+                    for element in elements:
+                        text = element.get_text(strip=True)
+                        
+                        # Validate it's actually storage-related
+                        if self._is_valid_storage_variant(text):
+                            clean_text = self._clean_variant_text(text)
+                            if clean_text:
+                                variant = self._create_storage_variant(clean_text, element, main_price)
+                                if variant:
+                                    variants.append(variant)
+                    
+                    if variants:
+                        break  # Found storage variants, stop looking
+            
+            return self._deduplicate_variants(variants)
+            
+        except Exception as e:
+            logger.debug(f"Error extracting storage variants: {e}")
+            return []
+    
+    def _extract_color_variants_2024(self, soup, product_name, main_price=None):
+        """Extract color variants with high precision"""
+        variants = []
+        try:
+            logger.debug("Extracting color variants...")
+            
+            # Specific color selectors (high precision)
+            color_selectors = [
+                # Color swatches and buttons
+                '[data-dp-url*="color_name"] img',
+                '.color-picker img',
+                '.color-swatch img',
+                '[role="radiogroup"][aria-label*="color" i] img',
+                '[data-csa-c-element-id*="color"] img',
+                
+                # Color dropdown options
+                'select[data-a-popover*="color_name"] option',
+                'select[name*="color_name"] option',
+                'select[name*="color"] option',
+                '#color_name .a-dropdown-container option',
+                
+                # Color buttons with text
+                '[data-dp-url*="color_name"] button',
+                '.color-picker button',
+                '[role="radiogroup"][aria-label*="color" i] [role="radio"]',
+                
+                # Image-based color variants
+                '.item-option img[alt*="color" i]',
+                '.variant-image img[alt*="Silver" i]',
+                '.variant-image img[alt*="Black" i]',
+                '.variant-image img[alt*="White" i]',
+                '.variant-image img[alt*="Blue" i]',
+                '.variant-image img[alt*="Gold" i]',
+                '.variant-image img[alt*="Rose" i]'
+            ]
+            
+            for selector in color_selectors:
+                elements = soup.select(selector)
+                if elements:
+                    logger.debug(f"Checking {len(elements)} elements with color selector: {selector}")
+                    
+                    for element in elements:
+                        color_info = self._extract_color_from_element(element)
+                        if color_info:
+                            variant = self._create_color_variant(color_info, element, main_price)
+                            if variant:
+                                variants.append(variant)
+                    
+                    if variants:
+                        break  # Found color variants, stop looking
+            
+            return self._deduplicate_variants(variants)
+            
+        except Exception as e:
+            logger.debug(f"Error extracting color variants: {e}")
+            return []
+    
+    def _extract_size_variants_2024(self, soup, product_name, main_price=None):
+        """Extract size variants (clothing, accessories)"""
+        variants = []
+        try:
+            logger.debug("Extracting size variants...")
+            
+            # Only extract sizes for relevant categories
+            if not any(keyword in product_name.lower() for keyword in ['shirt', 'dress', 'shoe', 'clothing', 'apparel', 'jacket', 'pant', 'jean']):
+                return []  # Skip size extraction for electronics, etc.
+            
+            size_selectors = [
+                'select[name*="size"] option',
+                '.size-picker button',
+                '[role="radiogroup"][aria-label*="size" i] [role="radio"]',
+                '.size-button button'
+            ]
+            
+            for selector in size_selectors:
+                elements = soup.select(selector)
+                if elements:
+                    for element in elements:
+                        text = element.get_text(strip=True)
+                        if self._is_valid_size_variant(text):
+                            clean_text = self._clean_variant_text(text)
+                            if clean_text:
+                                variant = self._create_size_variant(clean_text, element, main_price)
+                                if variant:
+                                    variants.append(variant)
+                    if variants:
+                        break
+            
+            return self._deduplicate_variants(variants)
+            
+        except Exception as e:
+            logger.debug(f"Error extracting size variants: {e}")
+            return []
+    
+    def _extract_style_variants_2024(self, soup, product_name, main_price=None):
+        """Extract style/model variants"""
+        variants = []
+        try:
+            logger.debug("Extracting style variants...")
+            
+            style_selectors = [
+                'select[name*="style"] option',
+                'select[name*="model"] option',
+                '.style-picker button',
+                '[role="radiogroup"][aria-label*="style" i] [role="radio"]'
+            ]
+            
+            for selector in style_selectors:
+                elements = soup.select(selector)
+                if elements:
+                    for element in elements:
+                        text = element.get_text(strip=True)
+                        if self._is_valid_style_variant(text):
+                            clean_text = self._clean_variant_text(text)
+                            if clean_text:
+                                variant = self._create_style_variant(clean_text, element, main_price)
+                                if variant:
+                                    variants.append(variant)
+                    if variants:
+                        break
+            
+            return self._deduplicate_variants(variants)
+            
+        except Exception as e:
+            logger.debug(f"Error extracting style variants: {e}")
+            return []
+    
+
+    def _is_valid_storage_variant(self, text):
+        """Check if text represents a valid storage variant"""
+        if not text or len(text) > 100:
+            return False
+        
+        text_lower = text.lower()
+        
+        # Must contain storage-related keywords
+        storage_keywords = ['gb', 'tb', 'storage', 'memory', 'ram', 'ssd', 'hdd', 'emmc']
+        if not any(keyword in text_lower for keyword in storage_keywords):
+            return False
+        
+        # Exclude invalid patterns
+        invalid_patterns = [
+            'shop the store', 'amazon', 'out of 5 stars', 'limited time',
+            'business card', 'reload your balance', 'buying options',
+            'see available', 'add to cart', 'buy now', 'ships from'
+        ]
+        
+        for pattern in invalid_patterns:
+            if pattern in text_lower:
+                return False
+        
+        return True
+    
+    def _extract_color_from_element(self, element):
+        """Extract color information from an element"""
+        color_info = {}
+        
+        # Try alt text from images
+        if element.name == 'img':
+            alt_text = element.get('alt', '')
+            if alt_text:
+                # Look for color names in alt text
+                colors = ['silver', 'black', 'white', 'blue', 'red', 'gold', 'rose', 'green', 'pink', 'gray', 'grey']
+                for color in colors:
+                    if color in alt_text.lower():
+                        color_info['color'] = color.title()
+                        color_info['image'] = element.get('src') or element.get('data-src')
+                        break
+        
+        # Try text content
+        if not color_info:
+            text = element.get_text(strip=True)
+            if text and len(text) < 50:
+                colors = ['silver', 'black', 'white', 'blue', 'red', 'gold', 'rose', 'green', 'pink', 'gray', 'grey']
+                for color in colors:
+                    if color in text.lower() and 'star' not in text.lower():
+                        color_info['color'] = color.title()
+                        break
+        
+        return color_info if color_info else None
+    
+    def _is_valid_size_variant(self, text):
+        """Check if text represents a valid size variant"""
+        if not text or len(text) > 20:
+            return False
+        
+        text_lower = text.lower()
+        size_patterns = ['xs', 's', 'm', 'l', 'xl', 'xxl', 'small', 'medium', 'large', 'extra']
+        return any(pattern in text_lower for pattern in size_patterns)
+    
+    def _is_valid_style_variant(self, text):
+        """Check if text represents a valid style variant"""
+        if not text or len(text) > 80:
+            return False
+        
+        text_lower = text.lower()
+        invalid_patterns = ['shop the store', 'amazon', 'stars', 'business card']
+        return not any(pattern in text_lower for pattern in invalid_patterns)
+    
+    def _clean_variant_text(self, text):
+        """Clean variant text by removing price, stock, and promotional info"""
+        if not text:
+            return None
+        
+        clean_text = text.strip()
+        
+        # Remove price patterns
+        price_patterns = [
+            r'\$[0-9,]+\.?[0-9]*',  # $123.45
+            r'with \d+\s*percent savings?',  # with 26 percent savings
+            r'List Price:.*?\$[0-9,]+\.?[0-9]*',  # List Price: $399.00
+            r'Typical:.*?\$[0-9,]+\.?[0-9]*',  # Typical: $1,499.99
+            r'\d+% off',  # 73% off
+            r'Limited time deal',  # Limited time deal
+        ]
+        
+        for pattern in price_patterns:
+            clean_text = re.sub(pattern, '', clean_text, flags=re.IGNORECASE)
+        
+        # Remove stock info
+        stock_patterns = [
+            r'In Stock',
+            r'Out of Stock',
+            r'Only \d+ left in stock.*?',
+            r'\d+\+ bought.*?month'
+        ]
+        
+        for pattern in stock_patterns:
+            clean_text = re.sub(pattern, '', clean_text, flags=re.IGNORECASE)
+        
+        # Clean up whitespace
+        clean_text = re.sub(r'\s+', ' ', clean_text).strip()
+        
+        # Return only if meaningful text remains
+        if len(clean_text) < 3 or len(clean_text) > 100:
+            return None
+        
+        return clean_text
+    
+    def _create_storage_variant(self, clean_text, element, main_price):
+        """Create a storage variant object"""
+        try:
+            # Extract price from element if available
+            price = self._extract_price_from_element(element) or main_price or 0
+            
+            # Extract image if available
+            image = self._extract_image_from_element(element)
+            
+            variant = {
+                'storage': clean_text,
+                'price': price,
+                'stock': 10,  # Default
+                'sku': f"STORAGE-{clean_text.replace(' ', '').replace('|', '')[:20]}",
+                'attributes': {'storage': clean_text}
+            }
+            
+            if image:
+                variant['images'] = [image]
+            
+            return variant
+        except:
+            return None
+    
+    def _create_color_variant(self, color_info, element, main_price):
+        """Create a color variant object"""
+        try:
+            color = color_info.get('color')
+            if not color:
+                return None
+            
+            price = self._extract_price_from_element(element) or main_price or 0
+            image = color_info.get('image') or self._extract_image_from_element(element)
+            
+            variant = {
+                'color': color,
+                'price': price,
+                'stock': 10,  # Default
+                'sku': f"COLOR-{color.replace(' ', '')}",
+                'attributes': {'color': color}
+            }
+            
+            if image:
+                variant['images'] = [image]
+            
+            return variant
+        except:
+            return None
+    
+    def _create_size_variant(self, clean_text, element, main_price):
+        """Create a size variant object"""
+        try:
+            price = self._extract_price_from_element(element) or main_price or 0
+            
+            variant = {
+                'size': clean_text,
+                'price': price,
+                'stock': 10,  # Default
+                'sku': f"SIZE-{clean_text.replace(' ', '')}",
+                'attributes': {'size': clean_text}
+            }
+            
+            return variant
+        except:
+            return None
+    
+    def _create_style_variant(self, clean_text, element, main_price):
+        """Create a style variant object"""
+        try:
+            price = self._extract_price_from_element(element) or main_price or 0
+            
+            variant = {
+                'style': clean_text,
+                'price': price,
+                'stock': 10,  # Default
+                'sku': f"STYLE-{clean_text.replace(' ', '')[:20]}",
+                'attributes': {'style': clean_text}
+            }
+            
+            return variant
+        except:
+            return None
+    
+    def _extract_price_from_element(self, element):
+        """Extract price from an element"""
+        try:
+            # Look for price in nearby elements
+            price_selectors = ['.price', '.a-price', '.a-price-whole', '[class*="price"]']
+            
+            for selector in price_selectors:
+                price_elem = element.select_one(selector) or element.find_parent().select_one(selector)
+                if price_elem:
+                    price_text = price_elem.get_text(strip=True)
+                    price_match = re.search(r'\$([0-9,]+\.?[0-9]*)', price_text)
+                    if price_match:
+                        return float(price_match.group(1).replace(',', ''))
+        except:
+            pass
+        return None
+    
+    def _extract_image_from_element(self, element):
+        """Extract image URL from an element"""
+        try:
+            if element.name == 'img':
+                return element.get('src') or element.get('data-src')
+            
+            img = element.select_one('img')
+            if img:
+                return img.get('src') or img.get('data-src')
+        except:
+            pass
+        return None
+    
+    def _deduplicate_variants(self, variants):
+        """Remove duplicate variants"""
+        if not variants:
+            return []
+        
+        seen = set()
+        unique_variants = []
+        
+        for variant in variants:
+            # Create a key for deduplication
+            key_parts = []
+            for variant_type in ['storage', 'color', 'size', 'style']:
+                if variant_type in variant:
+                    key_parts.append(f"{variant_type}:{variant[variant_type]}")
+            
+            key = "|".join(key_parts)
+            if key and key not in seen:
+                seen.add(key)
+                unique_variants.append(variant)
+        
+        return unique_variants
+    
+    def _clean_and_validate_variants(self, variants):
+        """Final cleaning and validation of variants"""
+        if not variants:
+            return []
+        
+        clean_variants = []
+        for variant in variants:
+            # Check if variant has meaningful content
+            has_content = False
+            for variant_type in ['storage', 'color', 'size', 'style']:
+                if variant_type in variant and variant[variant_type]:
+                    has_content = True
+                    break
+            
+            if has_content and variant.get('price', 0) >= 0:
+                clean_variants.append(variant)
+        
+        return clean_variants
+    

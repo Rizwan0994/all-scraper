@@ -10,6 +10,7 @@ import json
 import logging
 from datetime import datetime
 import os
+from chunk_manager import ChunkManager
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,8 @@ class DatabaseManager:
         self._attribute_parent_cache = {}
         # maps parent_id -> { normalized_child_name: child_id }
         self._attribute_children_cache = {}
+        # Chunk manager for efficient data loading
+        self.chunk_manager = ChunkManager()
     
     def load_credentials(self):
         """Load database credentials from db-credential.tx file"""
@@ -264,19 +267,32 @@ class DatabaseManager:
         - Inserts rows into `product_attributes` for parents (type='parent') and used values (type='child')
         """
         try:
+            logger.info(f"Starting attribute insertion for product ID: {product_id}")
             # 1) Collect attribute -> set(values) from product
             attribute_to_values = self._collect_product_attribute_values(product)
+            
+            if not attribute_to_values:
+                logger.info(f"No attributes found for product ID: {product_id}")
+                return
+            
+            logger.info(f"Found {len(attribute_to_values)} attribute types: {list(attribute_to_values.keys())}")
 
             # 2) Ensure parents/values exist and insert product_attributes rows
+            total_links = 0
             for attr_name, values in attribute_to_values.items():
+                logger.info(f"Processing attribute '{attr_name}' with {len(values)} values: {list(values)}")
                 parent_id = self._get_or_create_attribute_parent(cursor, attr_name)
                 # Insert parent link (if not exists)
                 self._ensure_product_attribute_link(cursor, product_id, parent_id, 'parent')
+                total_links += 1
 
                 # Insert value links
                 for value_name in values:
                     child_id = self._get_or_create_attribute_value(cursor, parent_id, value_name)
                     self._ensure_product_attribute_link(cursor, product_id, child_id, 'child')
+                    total_links += 1
+            
+            logger.info(f"Successfully created {total_links} attribute links for product ID: {product_id}")
 
         except Exception as e:
             logger.error(f"Error inserting product attributes: {e}")
@@ -447,8 +463,14 @@ class DatabaseManager:
 
         # Common product-level keys
         for key in ['color', 'size', 'material', 'brand', 'weight', 'dimensions', 'capacity', 'flavor', 'pack size', 'pack_size']:
-            if key in product and product.get(key) not in (None, ''):
-                add(key, product.get(key))
+            value = product.get(key)
+            if key in product and value not in (None, ''):
+                # Skip meaningless default values
+                if key == 'weight' and (value == 0 or value == 0.0 or str(value) == '0.0'):
+                    continue
+                if key in ['height', 'length', 'width'] and (value == 0 or value == 0.0 or str(value) == '0.0'):
+                    continue
+                add(key, value)
 
         # attributes could be dict or list
         attrs = product.get('attributes')
@@ -484,6 +506,7 @@ class DatabaseManager:
         """Return id for parent attribute (parent_id IS NULL), creating if needed."""
         normalized = self._normalize_text(name)
         if normalized in self._attribute_parent_cache:
+            logger.debug(f"Using cached parent attribute '{name}' (ID: {self._attribute_parent_cache[normalized]})")
             return self._attribute_parent_cache[normalized]
 
         select_sql = "SELECT id FROM attributes WHERE LOWER(name) = %s AND parent_id IS NULL LIMIT 1"
@@ -492,6 +515,7 @@ class DatabaseManager:
         if row:
             parent_id = int(row[0])
             self._attribute_parent_cache[normalized] = parent_id
+            logger.debug(f"Found existing parent attribute '{name}' (ID: {parent_id})")
             return parent_id
 
         now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -504,6 +528,7 @@ class DatabaseManager:
         self._attribute_parent_cache[normalized] = parent_id
         # init children cache bucket
         self._attribute_children_cache.setdefault(parent_id, {})
+        logger.info(f"Created new parent attribute '{name}' (ID: {parent_id})")
         return parent_id
 
     def _get_or_create_attribute_value(self, cursor, parent_id, value_name):
@@ -511,6 +536,7 @@ class DatabaseManager:
         normalized_value = self._normalize_text(value_name)
         children_cache = self._attribute_children_cache.setdefault(parent_id, {})
         if normalized_value in children_cache:
+            logger.debug(f"Using cached attribute value '{value_name}' (ID: {children_cache[normalized_value]})")
             return children_cache[normalized_value]
 
         select_sql = "SELECT id FROM attributes WHERE LOWER(name) = %s AND parent_id = %s LIMIT 1"
@@ -519,6 +545,7 @@ class DatabaseManager:
         if row:
             child_id = int(row[0])
             children_cache[normalized_value] = child_id
+            logger.debug(f"Found existing attribute value '{value_name}' (ID: {child_id})")
             return child_id
 
         now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -529,6 +556,7 @@ class DatabaseManager:
         cursor.execute(insert_sql, (value_name.strip(), 'active', 0, parent_id, now, now))
         child_id = cursor.lastrowid
         children_cache[normalized_value] = child_id
+        logger.info(f"Created new attribute value '{value_name}' (ID: {child_id}, parent: {parent_id})")
         return child_id
 
     def _ensure_product_attribute_link(self, cursor, product_id, attribute_id, link_type):
@@ -810,8 +838,16 @@ class DatabaseManager:
             logger.error(f"Error deleting product variations: {e}")
     
     def get_product_count(self):
-        """Get total number of products in JSON file"""
+        """Get total number of products efficiently"""
         try:
+            # Try to get count from chunk index first
+            chunks_index_file = "scraped_data/chunks/index.json"
+            if os.path.exists(chunks_index_file):
+                with open(chunks_index_file, 'r', encoding='utf-8') as f:
+                    index = json.load(f)
+                    return index.get('total_products', 0)
+            
+            # Fallback to JSON file
             json_file = "scraped_data/products.json"
             if os.path.exists(json_file):
                 with open(json_file, 'r', encoding='utf-8') as f:
@@ -821,3 +857,144 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error getting product count: {e}")
             return 0
+    
+    def _load_products_efficiently(self):
+        """Load products using chunks if available, fallback to JSON"""
+        try:
+            # Check if chunks are available
+            chunks_index_file = "scraped_data/chunks/index.json"
+            if os.path.exists(chunks_index_file):
+                logger.info("Loading products from chunks...")
+                products = []
+                for chunk_products in self.chunk_manager.get_all_products_for_db():
+                    products.extend(chunk_products)
+                logger.info(f"Loaded {len(products):,} products from chunks")
+                return products
+            
+            # Fallback to traditional JSON loading
+            logger.info("Chunks not available, loading from JSON file...")
+            json_file = "scraped_data/products.json"
+            if not os.path.exists(json_file):
+                raise Exception('No products.json file found. Please scrape some products first.')
+            
+            with open(json_file, 'r', encoding='utf-8') as f:
+                products = json.load(f)
+            
+            logger.info(f"Loaded {len(products):,} products from JSON file")
+            return products
+        
+        except Exception as e:
+            logger.error(f"Error loading products: {e}")
+            raise
+    
+    def insert_products_chunked(self, test_mode=False, connection_params=None):
+        """Insert products using efficient chunk loading"""
+        try:
+            logger.info(f"Starting chunked product insertion. Test mode: {test_mode}")
+            
+            # Connect to database
+            if connection_params:
+                if not self.connect(**connection_params):
+                    return {'success': False, 'message': 'Database connection failed'}
+            else:
+                if not self.connection or not self.connection.is_connected():
+                    if not self.connect():
+                        return {'success': False, 'message': 'Database connection failed'}
+            
+            cursor = self.connection.cursor()
+            total_inserted = 0
+            total_updated = 0
+            total_chunks = 0
+            
+            # Check if chunks are available
+            chunks_index_file = "scraped_data/chunks/index.json"
+            if os.path.exists(chunks_index_file):
+                logger.info("Using chunk-based insertion...")
+                
+                # Get chunk information
+                with open(chunks_index_file, 'r', encoding='utf-8') as f:
+                    index = json.load(f)
+                
+                total_products = index.get('total_products', 0)
+                logger.info(f"Total products to process: {total_products:,}")
+                
+                # Process chunks
+                for chunk_products in self.chunk_manager.get_all_products_for_db():
+                    total_chunks += 1
+                    
+                    if test_mode and total_chunks > 1:
+                        logger.info("Test mode: Processing only first chunk")
+                        break
+                    
+                    logger.info(f"Processing chunk {total_chunks} with {len(chunk_products):,} products...")
+                    
+                    # Process products in this chunk
+                    chunk_inserted, chunk_updated = self._process_product_chunk(cursor, chunk_products)
+                    total_inserted += chunk_inserted
+                    total_updated += chunk_updated
+                    
+                    logger.info(f"Chunk {total_chunks} completed: {chunk_inserted} inserted, {chunk_updated} updated")
+                    
+                    # Commit after each chunk to avoid long transactions
+                    self.connection.commit()
+            
+            else:
+                # Fallback to traditional method
+                logger.info("Chunks not available, using traditional insertion...")
+                products = self._load_products_efficiently()
+                
+                if test_mode:
+                    products = products[:1]
+                
+                chunk_inserted, chunk_updated = self._process_product_chunk(cursor, products)
+                total_inserted += chunk_inserted
+                total_updated += chunk_updated
+                self.connection.commit()
+            
+            cursor.close()
+            
+            return {
+                'success': True,
+                'message': f'Successfully processed products: {total_inserted} inserted, {total_updated} updated',
+                'inserted': total_inserted,
+                'updated': total_updated,
+                'chunks_processed': total_chunks
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in chunked product insertion: {e}")
+            if self.connection:
+                self.connection.rollback()
+            return {'success': False, 'message': str(e)}
+    
+    def _process_product_chunk(self, cursor, products):
+        """Process a chunk of products"""
+        inserted_count = 0
+        updated_count = 0
+        
+        for i, product in enumerate(products):
+            try:
+                logger.info(f"Processing product {i+1}: {product.get('product_name', 'Unknown')[:50]}...")
+                
+                # Check if product already exists
+                existing_product_id = self._check_product_exists(cursor, product)
+                
+                if existing_product_id:
+                    # Update existing product
+                    if self._update_existing_product(cursor, existing_product_id, product):
+                        updated_count += 1
+                else:
+                    # Insert new product
+                    product_id = self._insert_main_product(cursor, product)
+                    if product_id:
+                        # Insert related data
+                        self._insert_product_images(cursor, product_id, product)
+                        self._insert_product_attributes(cursor, product_id, product)
+                        self._insert_product_variations(cursor, product_id, product)
+                        inserted_count += 1
+                        
+            except Exception as e:
+                logger.error(f"Error processing product {product.get('product_name', 'Unknown')}: {e}")
+                continue
+        
+        return inserted_count, updated_count

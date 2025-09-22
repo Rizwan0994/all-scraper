@@ -18,6 +18,7 @@ import io
 # Import our scraper modules
 from scraper.universal_scraper import UniversalScraper, Product
 from db_manager import DatabaseManager
+from chunk_manager import ChunkManager
 
 # Configure logging with UTF-8 encoding for Windows compatibility
 logging.basicConfig(
@@ -35,9 +36,10 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your-secret-key-here'
 socketio = SocketIO(app, cors_allowed_origins="*")
 
-# Initialize scraper and database manager
+# Initialize scraper, database manager, and chunk manager
 scraper = UniversalScraper(socketio=socketio)
 db_manager = DatabaseManager()
+chunk_manager = ChunkManager()
 
 # Authentication configuration
 ADMIN_PASSWORD = "scraper@123"  # Change this to your desired password
@@ -173,26 +175,300 @@ def get_status():
 
 @app.route('/products')
 def get_products():
-    """Get all scraped products from persistent files"""
+    """Get paginated products - DEPRECATED, use /api/products/page/<page> instead"""
     try:
-        # Try to load from persistent JSON file first
-        json_file = "scraped_data/products.json"
-        if os.path.exists(json_file):
-            with open(json_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                products = []
-                for item in data:
-                    products.append({
-                        'title': item.get('product_name', ''),
-                        'price': item.get('unit_price', 0.0),
-                        'category': item.get('category', ''),
-                        'sub_category': item.get('sub_category', ''),
-                        'source_site': item.get('source_site', ''),
-                        'rating': item.get('rating', 0.0),
-                        'image': item.get('product_images', [None])[0] if item.get('product_images') else None
+        # For backwards compatibility, return first page only
+        return get_products_page(1)
+    except Exception as e:
+        logger.error(f"Error in get_products: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/products/page/<int:page>')
+def get_products_page(page):
+    """Get products with pagination using chunks"""
+    if not check_auth():
+        return jsonify({'error': 'Authentication required'}), 401
+    
+    try:
+        per_page = request.args.get('per_page', 50, type=int)
+        per_page = min(max(per_page, 10), 200)  # Between 10-200 per page
+        
+        # Check if chunks are available
+        chunks_index_file = "scraped_data/chunks/index.json"
+        if os.path.exists(chunks_index_file):
+            logger.info(f"Loading page {page} from chunks ({per_page} per page)")
+            
+            # Load index
+            with open(chunks_index_file, 'r', encoding='utf-8') as f:
+                index = json.load(f)
+            
+            total_products = index.get('total_products', 0)
+            total_pages = (total_products + per_page - 1) // per_page
+            
+            # Calculate which chunk(s) we need
+            start_product = (page - 1) * per_page
+            end_product = start_product + per_page
+            
+            if start_product >= total_products:
+                return jsonify({
+                    'products': [],
+                    'page': page,
+                    'per_page': per_page,
+                    'total_products': total_products,
+                    'total_pages': total_pages,
+                    'has_more': False
+                })
+            
+            # Find relevant chunks
+            needed_chunks = []
+            for chunk_info in index["chunks"]:
+                chunk_start, chunk_end = chunk_info["product_range"]
+                # Convert to 0-based indexing
+                chunk_start_idx = chunk_start - 1
+                chunk_end_idx = chunk_end - 1
+                
+                if not (end_product <= chunk_start_idx or start_product > chunk_end_idx):
+                    needed_chunks.append(chunk_info)
+            
+            # Load and combine products from needed chunks
+            all_products = []
+            chunks_dir = "scraped_data/chunks"
+            
+            for chunk_info in needed_chunks:
+                chunk_path = os.path.join(chunks_dir, chunk_info["file"])
+                with open(chunk_path, 'r', encoding='utf-8') as f:
+                    chunk_data = json.load(f)
+                all_products.extend(chunk_data["products"])
+            
+            # Extract the exact page range
+            page_products = all_products[start_product:end_product]
+            
+            # Format products for frontend
+            formatted_products = []
+            for item in page_products:
+                formatted_products.append({
+                    'title': item.get('product_name', ''),
+                    'price': item.get('unit_price', 0.0),
+                    'category': item.get('category', ''),
+                    'sub_category': item.get('sub_category', ''),
+                    'source_site': item.get('source_site', ''),
+                    'rating': item.get('rating', 0.0),
+                    'image': item.get('product_images', [None])[0] if item.get('product_images') else None,
+                    'sku': item.get('sku', ''),
+                    'stock': item.get('current_stock', 0),
+                    'description': item.get('product_description', '')[:200] + '...' if len(item.get('product_description', '')) > 200 else item.get('product_description', '')
+                })
+            
+            return jsonify({
+                'products': formatted_products,
+                'page': page,
+                'per_page': per_page,
+                'total_products': total_products,
+                'total_pages': total_pages,
+                'has_more': page < total_pages
+            })
+        
+        else:
+            # Fallback to traditional loading for first 1000 products only
+            logger.info("Chunks not available, using fallback mode")
+            json_file = "scraped_data/products.json"
+            if os.path.exists(json_file):
+                logger.warning("Loading large JSON file - this may be slow!")
+                with open(json_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                
+                    # Limit to reasonable amount for performance
+                    if len(data) > 10000:
+                        logger.warning(f"Large dataset ({len(data)} products) - limiting to first 10,000")
+                        data = data[:10000]
+                
+                    total_products = len(data)
+                    total_pages = (total_products + per_page - 1) // per_page
+                
+                    start_idx = (page - 1) * per_page
+                    end_idx = start_idx + per_page
+                
+                    page_data = data[start_idx:end_idx]
+                
+                    products = []
+                    for item in page_data:
+                        products.append({
+                            'title': item.get('product_name', ''),
+                            'price': item.get('unit_price', 0.0),
+                            'category': item.get('category', ''),
+                            'sub_category': item.get('sub_category', ''),
+                            'source_site': item.get('source_site', ''),
+                            'rating': item.get('rating', 0.0),
+                            'image': item.get('product_images', [None])[0] if item.get('product_images') else None
+                        })
+                
+                    return jsonify({
+                        'products': products,
+                        'page': page,
+                        'per_page': per_page,
+                        'total_products': total_products,
+                        'total_pages': total_pages,
+                        'has_more': page < total_pages
                     })
-                logger.info(f"Loaded {len(products)} products from persistent file")
-                return jsonify(products)
+                
+        # No data available
+        return jsonify({
+            'products': [],
+            'page': page,
+            'per_page': per_page,
+            'total_products': 0,
+            'total_pages': 0,
+            'has_more': False
+        })
+        
+    except Exception as e:
+        logger.error(f"Error loading products page {page}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/products/stats')
+def get_products_stats():
+    """Get pre-computed statistics from cache"""
+    if not check_auth():
+        return jsonify({'error': 'Authentication required'}), 401
+    
+    try:
+        # Try to load from cache first
+        cache_file = "scraped_data/cache/stats.json"
+        if os.path.exists(cache_file):
+            with open(cache_file, 'r', encoding='utf-8') as f:
+                stats = json.load(f)
+            logger.info("Loaded stats from cache")
+            return jsonify(stats)
+        
+        # Try to load from chunks index
+        chunks_index_file = "scraped_data/chunks/index.json"
+        if os.path.exists(chunks_index_file):
+            with open(chunks_index_file, 'r', encoding='utf-8') as f:
+                index = json.load(f)
+            
+            stats = {
+                'total_products': index.get('total_products', 0),
+                'total_chunks': index.get('total_chunks', 0),
+                'global_stats': index.get('global_stats', {}),
+                'source': 'chunks_index'
+            }
+            return jsonify(stats)
+        
+        # Fallback to traditional stats
+        return get_status()
+        
+    except Exception as e:
+        logger.error(f"Error loading stats: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/products/search')
+def search_products():
+    """Search products across chunks"""
+    if not check_auth():
+        return jsonify({'error': 'Authentication required'}), 401
+    
+    try:
+        query = request.args.get('q', '').strip()
+        category = request.args.get('category', '').strip()
+        site = request.args.get('site', '').strip()
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 50, type=int)
+        per_page = min(max(per_page, 10), 200)
+        
+        if not query and not category and not site:
+            return jsonify({'error': 'At least one search parameter required'}), 400
+        
+        # Check if chunks are available
+        chunks_index_file = "scraped_data/chunks/index.json"
+        if os.path.exists(chunks_index_file):
+            with open(chunks_index_file, 'r', encoding='utf-8') as f:
+                index = json.load(f)
+            
+            # Find relevant chunks based on metadata
+            relevant_chunks = []
+            for chunk_info in index["chunks"]:
+                should_search = False
+                
+                if category and category.lower() in [c.lower() for c in chunk_info.get("categories", [])]:
+                    should_search = True
+                elif site and site.lower() in [s.lower() for s in chunk_info.get("sites", [])]:
+                    should_search = True
+                elif not category and not site:  # Text search - check all chunks
+                    should_search = True
+                
+                if should_search:
+                    relevant_chunks.append(chunk_info)
+            
+            # Search within relevant chunks
+            results = []
+            chunks_dir = "scraped_data/chunks"
+            
+            for chunk_info in relevant_chunks:
+                chunk_path = os.path.join(chunks_dir, chunk_info["file"])
+                with open(chunk_path, 'r', encoding='utf-8') as f:
+                    chunk_data = json.load(f)
+                
+                for product in chunk_data["products"]:
+                    matches = True
+                    
+                    # Text search
+                    if query:
+                        product_text = (
+                            product.get('product_name', '') + ' ' +
+                            product.get('product_description', '') + ' ' +
+                            product.get('category', '') + ' ' +
+                            product.get('source_site', '')
+                        ).lower()
+                        if query.lower() not in product_text:
+                            matches = False
+                    
+                    # Category filter
+                    if category and category.lower() != product.get('category', '').lower():
+                        matches = False
+                    
+                    # Site filter
+                    if site and site.lower() != product.get('source_site', '').lower():
+                        matches = False
+                    
+                    if matches:
+                        results.append({
+                            'title': product.get('product_name', ''),
+                            'price': product.get('unit_price', 0.0),
+                            'category': product.get('category', ''),
+                            'sub_category': product.get('sub_category', ''),
+                            'source_site': product.get('source_site', ''),
+                            'rating': product.get('rating', 0.0),
+                            'image': product.get('product_images', [None])[0] if product.get('product_images') else None,
+                            'sku': product.get('sku', ''),
+                            'stock': product.get('current_stock', 0)
+                        })
+            
+            # Paginate results
+            total_results = len(results)
+            total_pages = (total_results + per_page - 1) // per_page
+            start_idx = (page - 1) * per_page
+            end_idx = start_idx + per_page
+            page_results = results[start_idx:end_idx]
+            
+            return jsonify({
+                'products': page_results,
+                'page': page,
+                'per_page': per_page,
+                'total_results': total_results,
+                'total_pages': total_pages,
+                'has_more': page < total_pages,
+                'query': query,
+                'category': category,
+                'site': site,
+                'chunks_searched': len(relevant_chunks)
+            })
+        
+        else:
+            return jsonify({'error': 'Search requires chunks to be initialized'}), 503
+            
+    except Exception as e:
+        logger.error(f"Error searching products: {e}")
+        return jsonify({'error': str(e)}), 500
         
         # If no JSON file, try CSV file
         csv_file = "scraped_data/products.csv"
@@ -450,8 +726,8 @@ def insert_all_products():
                 'message': 'No products found in JSON file.'
             }), 400
         
-        # Insert all products with connection parameters
-        result = db_manager.insert_products(products, test_mode=False, connection_params=connection_params)
+        # Use chunked insertion method for better performance
+        result = db_manager.insert_products_chunked(test_mode=False, connection_params=connection_params)
         return jsonify(result)
         
     except Exception as e:
@@ -492,8 +768,8 @@ def insert_test_product():
                 'message': 'No products found in JSON file.'
             }), 400
         
-        # Insert only first product for testing with connection parameters
-        result = db_manager.insert_products(products, test_mode=True, connection_params=connection_params)
+        # Use chunked insertion method for testing (only first chunk)
+        result = db_manager.insert_products_chunked(test_mode=True, connection_params=connection_params)
         return jsonify(result)
         
     except Exception as e:

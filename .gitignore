@@ -29,3 +29,5 @@ coverage.xml
 .env.production
 .env.development
 .venv/
+
+scraped_data/
