@@ -1,0 +1,108 @@
+{
+  "timestamp": "2025-09-23T17:09:47.809154",
+  "total_products": 2,
+  "products_with_variants": 1,
+  "total_variants": 1,
+  "clean_variants": 1,
+  "fake_variants": 0,
+  "success_rate": 1.0,
+  "products": [
+    {
+      "product_name": "H is for Homicide A Kinsey Millhone Novel",
+      "product_type": "Single Product",
+      "purchase_price": 0.0,
+      "unit_price": 13.99,
+      "sku": "AMZ-H-0001",
+      "stock_status": "In Stock",
+      "current_stock": 79,
+      "discount": 0.0,
+      "discount_type": "%",
+      "product_images": [
+        "https://m.media-amazon.com/images/I/71IuysrGylL._AC_SX679_.jpg"
+      ],
+      "additional_images": [
+        "https://images-na.ssl-images-amazon.com/images/I/61YbCHMNg1L._AC_SX679_.jpg",
+        "https://images-na.ssl-images-amazon.com/images/I/514IYABilxL._AC_SX679_.jpg",
+        "https://images-na.ssl-images-amazon.com/images/I/71E1dl+yLfL._AC_SX679_.jpg",
+        "https://images-na.ssl-images-amazon.com/images/I/61wqmEKLGwL._AC_SX679_.jpg",
+        "https://images-na.ssl-images-amazon.com/images/I/41kh1xEiSRL._AC_SX679_.jpg",
+        "https://images-na.ssl-images-amazon.com/images/I/51jPQXgUdJL._AC_SX679_.jpg",
+        "https://m.media-amazon.com/images/I/41je4Qz9JsL._AC_SX679_.jpg",
+        "https://m.media-amazon.com/images/I/51-2vs5B+qL._AC_SX679_.jpg",
+        "https://m.media-amazon.com/images/I/51kRFsI7MWL._AC_SX679_.jpg",
+        "https://m.media-amazon.com/images/I/510cjAVKwiL._AC_SX679_.jpg",
+        "https://m.media-amazon.com/images/I/41Eo9zQiD0L._AC_SX679_.jpg",
+        "https://m.media-amazon.com/images/I/41A37L7IgkL._AC_SX679_.jpg",
+        "https://m.media-amazon.com/images/I/51cr+L-m4aL._AC_SX679_.jpg",
+        "https://m.media-amazon.com/images/I/51pTxd7EtiL._AC_SX679_.jpg"
+      ],
+      "category": "Books",
+      "sub_category": "Fiction",
+      "standard_delivery_time": "24 hr(s)",
+      "weight": 0.0,
+      "height": 0.0,
+      "length": 0.0,
+      "width": 0.0,
+      "product_description": "Quality H is for Homicide A Kinsey Millhone Novel from Amazon with fast shipping and customer support",
+      "meta_tags_description": "Buy H is for Homicide A Kinsey Millhone Novel from Amazon at competitive prices",
+      "rating": 4.4,
+      "review_count": 8,
+      "seller_name": "Amazon",
+      "source_site": "Amazon",
+      "source_url": "https://www.amazon.com/Homicide-Kinsey-Millhone-Novel-ebook/dp/B0031B7KBC/ref=sr_1_1?dib=eyJ2IjoiMSJ9.V9EY2e7L9YCzfzqDfoe-c8tMJvsZtxaL8mxiRyXsinIFWJi3DJ0u2o-WusT3VXCaNSL48GSBKIzrvIq-WDROANRayA9sFj6CKkZakYWaZRy9YYW5zWkG2kocxHvsvyy424fZCdvd9a3fMCc4K1dJssbt3JzfKtdOkOkBbCCvhMUbvJM_sOgARkP3MLDxgxsQYHZCkD9C8mC05lo7wHu2ObQwBmqE0iUgu0qDyzMpP7A.0JW0TVqTKCOIi4ayLlV4utXD2v4gm64xj9epSRRRg3M&dib_tag=se&keywords=h&qid=1758629180&sr=8-1",
+      "product_id": "amazon_h_1",
+      "scraped_at": "2025-09-23T17:07:44.062369",
+      "original_title": "H is for Homicide A Kinsey Millhone Novel",
+      "variants": []
+    },
+    {
+      "product_name": "Crying in H Mart A Memoir",
+      "product_type": "Variant",
+      "purchase_price": 0.0,
+      "unit_price": 9.85,
+      "sku": "AMZ-H-0005",
+      "stock_status": "In Stock",
+      "current_stock": 52,
+      "discount": 0.0,
+      "discount_type": "%",
+      "product_images": [
+        "https://m.media-amazon.com/images/I/817MacA5GnL._AC_SX679_.jpg"
+      ],
+      "additional_images": [
+        "https://m.media-amazon.com/images/I/417mPEEKJvL._AC_SX679_.jpg",
+        "https://images-na.ssl-images-amazon.com/images/I/817MacA5GnL._AC_SX679_.jpg",
+        "https://images-na.ssl-images-amazon.com/images/I/61A+LdmTESL._AC_SX679_.jpg",
+        "https://images-na.ssl-images-amazon.com/images/I/81lC3fiSG1L._AC_SX679_.jpg",
+        "https://images-na.ssl-images-amazon.com/images/I/81ymI1i0vLL._AC_SX679_.jpg"
+      ],
+      "category": "Electronics",
+      "sub_category": "General",
+      "standard_delivery_time": "24 hr(s)",
+      "weight": 0.0,
+      "height": 0.0,
+      "length": 0.0,
+      "width": 0.0,
+      "product_description": "Quality Crying in H Mart A Memoir from Amazon with fast shipping and customer support",
+      "meta_tags_description": "Buy Crying in H Mart A Memoir from Amazon at competitive prices",
+      "rating": 4.4,
+      "review_count": 28,
+      "seller_name": "Amazon",
+      "source_site": "Amazon",
+      "source_url": "https://www.amazon.com/Crying-Mart-Memoir-Michelle-Zauner/dp/1984898957/ref=sr_1_5?dib=eyJ2IjoiMSJ9.V9EY2e7L9YCzfzqDfoe-c8tMJvsZtxaL8mxiRyXsinIFWJi3DJ0u2o-WusT3VXCaNSL48GSBKIzrvIq-WDROANRayA9sFj6CKkZakYWaZRy9YYW5zWkG2kocxHvsvyy424fZCdvd9a3fMCc4K1dJssbt3JzfKtdOkOkBbCCvhMUbvJM_sOgARkP3MLDxgxsQYHZCkD9C8mC05lo7wHu2ObQwBmqE0iUgu0qDyzMpP7A.0JW0TVqTKCOIi4ayLlV4utXD2v4gm64xj9epSRRRg3M&dib_tag=se&keywords=h&qid=1758629180&sr=8-5",
+      "product_id": "amazon_h_5",
+      "scraped_at": "2025-09-23T17:09:24.008891",
+      "original_title": "Crying in H Mart A Memoir",
+      "variants": [
+        {
+          "type": "edition",
+          "name": "Crying in H Mart A Memoir",
+          "price": 9.85,
+          "stock": 50,
+          "sku": "VAR-0001",
+          "images": [],
+          "attributes": {}
+        }
+      ]
+    }
+  ]
+}

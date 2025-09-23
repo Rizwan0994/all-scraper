@@ -20,6 +20,21 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 from contextlib import contextmanager
 
+# Load environment variables
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+# AI Integration
+try:
+    import google.generativeai as genai
+    AI_AVAILABLE = True
+except ImportError:
+    AI_AVAILABLE = False
+    print("google-generativeai not installed. AI verification disabled.")
+
 # Anti-detection imports
 try:
     from fake_useragent import UserAgent
@@ -32,6 +47,14 @@ import cloudscraper
 # Import chunk manager
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from chunk_manager import ChunkManager
+
+# Import advanced variant extractor
+try:
+    from amazon_variant_extractor import AmazonVariantExtractor
+    ADVANCED_EXTRACTOR_AVAILABLE = True
+except ImportError:
+    ADVANCED_EXTRACTOR_AVAILABLE = False
+    print("Advanced variant extractor not available")
 
 # Undetected Chrome driver
 try:
@@ -59,6 +82,226 @@ except ImportError:
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
+class AIVerifier:
+    """AI-powered data verification using Gemini API"""
+    
+    def __init__(self):
+        self.api_key = os.getenv('GEMINI_API_KEY')
+        self.model = None
+        self.enabled = False
+        
+        if AI_AVAILABLE and self.api_key:
+            try:
+                genai.configure(api_key=self.api_key)
+                
+                # Try different model names
+                model_names = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro']
+                self.model = None
+                
+                for model_name in model_names:
+                    try:
+                        self.model = genai.GenerativeModel(model_name)
+                        logger.info(f"AI verification enabled with model: {model_name}")
+                        break
+                    except Exception as e:
+                        logger.debug(f"Model {model_name} failed: {e}")
+                        continue
+                
+                if self.model:
+                    self.enabled = True
+                    logger.info("AI verification enabled with Gemini API")
+                else:
+                    self.enabled = False
+                    logger.error("All Gemini models failed to initialize")
+                    
+            except Exception as e:
+                logger.error(f"Failed to initialize Gemini AI: {e}")
+                self.enabled = False
+        else:
+            if not AI_AVAILABLE:
+                logger.warning("Google Generative AI not available - AI verification disabled")
+            if not self.api_key:
+                logger.warning("GEMINI_API_KEY not found in environment - AI verification disabled")
+    
+    def verify_variants(self, variants: List[Dict], product_name: str, main_price: float = None) -> List[Dict]:
+        """Verify and clean product variants using AI or rule-based filtering"""
+        if not variants:
+            return variants
+        
+        # If AI is not available, use rule-based filtering
+        if not self.enabled:
+            logger.info(f"AI not available, using rule-based variant filtering for: {product_name[:50]}...")
+            return self._filter_variants_rule_based(variants, product_name, main_price)
+        
+        try:
+            logger.info(f"AI verifying {len(variants)} variants for: {product_name[:50]}...")
+            
+            # Prepare variants text for AI analysis
+            variants_text = "\n".join([
+                f"- {v.get('name', v.get('option', v.get('color', 'Unknown')))}: ${v.get('price', 'N/A')}"
+                for v in variants
+            ])
+            
+            # Create AI prompt
+            prompt = f"""
+You are an expert e-commerce data analyst. Analyze these scraped product variants and clean them up.
+
+PRODUCT: {product_name}
+MAIN PRICE: ${main_price or 'N/A'}
+
+CURRENT VARIANTS:
+{variants_text}
+
+TASKS:
+1. Identify REAL product variants (colors, sizes, storage, styles, etc.)
+2. Remove FAKE variants (quantity selectors like "1+", "2+", JavaScript code, etc.)
+3. Standardize variant names and attributes
+4. Ensure proper pricing and structure
+
+RESPONSE FORMAT (JSON only):
+{{
+    "verified_variants": [
+        {{
+            "type": "color|size|storage|style|model",
+            "name": "variant name",
+            "price": {main_price or 0.0},
+            "stock": 50,
+            "sku": "VAR-XXXX",
+            "images": [],
+            "attributes": {{"color": "value"}}
+        }}
+    ],
+    "confidence_score": 0.95,
+    "notes": "verification notes"
+}}
+
+IMPORTANT:
+- Only return valid product variants
+- Skip quantity selectors, JavaScript, or non-product options
+- Use original product price if no variant-specific pricing
+- Be conservative - fewer accurate variants is better than many fake ones
+"""
+            
+            # Call Gemini API
+            response = self.model.generate_content(prompt)
+            ai_response = response.text
+            
+            # Parse AI response
+            verified_variants = self._parse_ai_response(ai_response, variants, main_price)
+            
+            logger.info(f"AI verification: {len(variants)} → {len(verified_variants)} variants")
+            return verified_variants
+            
+        except Exception as e:
+            logger.error(f"AI verification failed: {e}")
+            # Fallback to rule-based filtering
+            return self._filter_variants_rule_based(variants, product_name, main_price)
+    
+    def _filter_variants_rule_based(self, variants: List[Dict], product_name: str, main_price: float = None) -> List[Dict]:
+        """Rule-based variant filtering when AI is not available"""
+        filtered_variants = []
+        
+        # Define invalid variant patterns
+        invalid_patterns = [
+            r'^\d+\+?$',  # Numbers with optional +
+            r'^qty',  # Quantity indicators
+            r'^quantity',  # Quantity indicators
+            r'add to list',  # UI elements
+            r'update page',  # UI elements
+            r'select',  # Placeholder text
+            r'choose',  # Placeholder text
+            r'please select',  # Placeholder text
+            r'^all departments$',  # Navigation elements
+            r'^arts & crafts$',  # Navigation elements
+            r'^automotive$',  # Navigation elements
+            r'^baby$',  # Navigation elements
+            r'^beauty & personal care$',  # Navigation elements
+            r'^books$',  # Navigation elements
+            r'^boys\' fashion$',  # Navigation elements
+            r'^computers$',  # Navigation elements
+            r'^deals$',  # Navigation elements
+            r'^digital music$',  # Navigation elements
+            r'^electronics$',  # Navigation elements
+            r'^girls\' fashion$',  # Navigation elements
+            r'^health & household$',  # Navigation elements
+            r'^home & kitchen$',  # Navigation elements
+            r'^industrial & scientific$',  # Navigation elements
+            r'^kindle store$',  # Navigation elements
+            r'^luggage$',  # Navigation elements
+            r'^men\'s fashion$',  # Navigation elements
+            r'^movies & tv$',  # Navigation elements
+            r'^music, cds & vinyl$',  # Navigation elements
+            r'^pet supplies$',  # Navigation elements
+            r'^prime video$',  # Navigation elements
+            r'^software$',  # Navigation elements
+            r'^sports & outdoors$',  # Navigation elements
+            r'^tools & home improvement$',  # Navigation elements
+            r'^toys & games$',  # Navigation elements
+            r'^video games$',  # Navigation elements
+            r'^women\'s fashion$',  # Navigation elements
+        ]
+        
+        for variant in variants:
+            # Get variant name
+            variant_name = variant.get('name', variant.get('option', variant.get('color', '')))
+            
+            if not variant_name or len(variant_name.strip()) < 2:
+                continue
+            
+            # Check against invalid patterns
+            is_invalid = False
+            for pattern in invalid_patterns:
+                if re.match(pattern, variant_name.lower()):
+                    is_invalid = True
+                    break
+            
+            if is_invalid:
+                continue
+            
+            # Clean up the variant
+            cleaned_variant = {
+                'type': variant.get('type', 'variant'),
+                'name': variant_name.strip(),
+                'price': variant.get('price', main_price),
+                'stock': variant.get('stock', 50),
+                'sku': variant.get('sku', f"VAR-{hash(variant_name) % 10000:04d}"),
+                'images': variant.get('images', []),
+                'attributes': variant.get('attributes', {variant.get('type', 'variant'): variant_name.strip()})
+            }
+            
+            filtered_variants.append(cleaned_variant)
+        
+        logger.info(f"Rule-based filtering: {len(variants)} → {len(filtered_variants)} variants")
+        return filtered_variants
+    
+    def _parse_ai_response(self, ai_response: str, original_variants: List[Dict], main_price: float) -> List[Dict]:
+        """Parse AI response and extract verified variants"""
+        try:
+            # Extract JSON from AI response
+            json_start = ai_response.find('{')
+            json_end = ai_response.rfind('}') + 1
+            
+            if json_start == -1 or json_end == 0:
+                logger.warning("No JSON found in AI response")
+                return original_variants
+            
+            ai_data = json.loads(ai_response[json_start:json_end])
+            verified_variants = ai_data.get('verified_variants', [])
+            
+            # Log verification results
+            confidence = ai_data.get('confidence_score', 0.0)
+            notes = ai_data.get('notes', '')
+            logger.info(f"AI confidence: {confidence:.2f} - {notes}")
+            
+            return verified_variants
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse AI response as JSON: {e}")
+            return original_variants
+        except Exception as e:
+            logger.error(f"Error parsing AI response: {e}")
+            return original_variants
 
 @dataclass
 class Product:
@@ -206,6 +449,10 @@ class UniversalScraper:
         # Initialize chunk manager for efficient data handling
         self.chunk_manager = ChunkManager()
         self.chunk_manager.initialize_from_existing()
+        
+        # Initialize AI verifier for data cleaning
+        self.ai_verifier = AIVerifier()
+        
         self.current_stats = {
             'total_products': 0,
             'site_breakdown': {},
@@ -1277,6 +1524,64 @@ class UniversalScraper:
             'Upgrade-Insecure-Requests': '1'
         })
     
+    def scrape_single_product(self, product_url, site='amazon'):
+        """Scrape a single product from a specific URL"""
+        logger.info(f"Scraping single product from: {product_url}")
+        
+        self.current_stats['current_site'] = site.title()
+        self.current_stats['current_status'] = f'Scraping {site.title()} product...'
+        
+        # Setup site-specific session
+        self.setup_site_specific_session(site)
+        if site.lower() == 'amazon':
+            self._improve_amazon_headers()
+        
+        self.emit_update('status_update', self.current_stats)
+        
+        try:
+            if site.lower() == 'amazon':
+                return self._scrape_amazon_single_product(product_url)
+            else:
+                logger.warning(f"Single product scraping not implemented for {site}")
+                return []
+        except Exception as e:
+            logger.error(f"Error scraping single product: {e}")
+            return []
+    
+    def _scrape_amazon_single_product(self, product_url):
+        """Scrape a single Amazon product from URL"""
+        try:
+            # Use Selenium to get the product page with JavaScript rendering
+            logger.info(f"Using Selenium to get product page: {product_url}")
+            self.stealth_driver.get(product_url)
+            time.sleep(random.uniform(3, 5))  # Allow page to load
+            
+            # Get the page source after JavaScript execution
+            page_source = self.stealth_driver.page_source
+            logger.info(f"Got product page with Selenium: {len(page_source)} characters")
+            
+            # Parse the page
+            soup = BeautifulSoup(page_source, 'html.parser')
+            
+            # Extract product details
+            product = self._extract_amazon_product_details(soup, product_url)
+            
+            if product:
+                # Add product to collection
+                if self.add_product(product):
+                    logger.info(f"Product added: {product.product_name[:50]}... ({product.source_site})")
+                    return [product]
+                else:
+                    logger.warning("Product was not added (likely duplicate)")
+                    return []
+            else:
+                logger.warning("Failed to extract product details")
+                return []
+                
+        except Exception as e:
+            logger.error(f"Error scraping Amazon single product: {e}")
+            return []
+
     def scrape_amazon(self, keywords, max_products=100):
         """Scrape Amazon products with real data only - Enhanced for 2024"""
         self.current_stats['current_site'] = 'Amazon'
@@ -1409,8 +1714,18 @@ class UniversalScraper:
                     except Exception as e:
                         logger.warning(f"Failed to fetch product page for variants: {e}")
 
-                    # Extract variants if available (prefer product_soup) with main price fallback
-                    variants = self._extract_variants_enhanced_2024(product_soup or soup, title, main_price=price)
+                    # Extract variants using advanced method with proper JavaScript interaction
+                    if ADVANCED_EXTRACTOR_AVAILABLE and self.stealth_driver:
+                        try:
+                            logger.info(f"Using advanced variant extraction for: {title[:50]}...")
+                            extractor = AmazonVariantExtractor(self.stealth_driver)
+                            variants = extractor.extract_variants_comprehensive(product_url, title, price)
+                            logger.info(f"Advanced extraction found {len(variants)} variants")
+                        except Exception as e:
+                            logger.warning(f"Advanced extraction failed, falling back to standard: {e}")
+                            variants = self._extract_variants_enhanced_2024(product_soup or soup, title, main_price=price)
+                    else:
+                        variants = self._extract_variants_enhanced_2024(product_soup or soup, title, main_price=price)
                     
                     # Extract structured data for enhanced accuracy
                     structured_data = self._extract_structured_data(product_soup or soup, title)
@@ -1425,12 +1740,15 @@ class UniversalScraper:
                         # Extract variant-specific images from the PRODUCT page
                         variant_specific_images = self._extract_variant_images(product_soup or soup, title)
                         
+                        # Check if variants need image mapping (from advanced extractor)
+                        needs_image_mapping = any(variant.get('images') is None for variant in variants)
+                        
                         if variant_specific_images:
                             logger.info(f"Found {len(variant_specific_images)} variant-specific images")
                             self._map_variant_images_realistically(variants, variant_specific_images, main_image_url)
-                        else:
+                        elif needs_image_mapping:
                             # Fallback: Intelligent image distribution based on variant type
-                            logger.info("No variant-specific images found, using intelligent fallback")
+                            logger.info("No variant-specific images found, using intelligent fallback for advanced extractor variants")
                             self._map_variant_images_fallback(variants, additional_images, main_image_url)
                         
                         # For products with variants, keep first 3-5 additional images for the main product too
@@ -1466,6 +1784,21 @@ class UniversalScraper:
                         current_stock=random.randint(10, 100),  # Realistic stock levels
                         variants=variants
                     )
+                    
+                    # AI Verification: Clean up product variants using AI
+                    if self.ai_verifier and product.variants:
+                        try:
+                            logger.info(f"AI verifying Amazon product variants: {product.product_name[:50]}...")
+                            verified_variants = self.ai_verifier.verify_variants(
+                                product.variants, 
+                                product.product_name, 
+                                product.unit_price
+                            )
+                            product.variants = verified_variants
+                            logger.info(f"AI verification complete: {len(verified_variants)} verified variants")
+                        except Exception as e:
+                            logger.error(f"AI verification failed: {e}")
+                            # Continue with original variants if AI fails
                     
                     # Enhance product with structured data for better accuracy
                     product = self._enhance_product_with_structured_data(product, structured_data)
@@ -2316,6 +2649,21 @@ class UniversalScraper:
                 existing_product.source_site == product.source_site):
                 logger.info(f"Duplicate product name skipped: {product.product_name[:50]}...")
                 return False
+        
+        # AI Verification: Clean up product variants before adding
+        if self.ai_verifier and product.variants:
+            try:
+                logger.info(f"AI verifying product variants for: {product.product_name[:50]}...")
+                verified_variants = self.ai_verifier.verify_variants(
+                    product.variants, 
+                    product.product_name, 
+                    product.unit_price
+                )
+                product.variants = verified_variants
+                logger.info(f"AI verification complete: {len(verified_variants)} verified variants")
+            except Exception as e:
+                logger.error(f"AI verification failed: {e}")
+                # Continue with original variants if AI fails
         
         # Add to collections
         self.scraped_products.append(product)
@@ -3726,41 +4074,47 @@ class UniversalScraper:
             
             logger.info(f"Enhanced fallback mapping: {len(variants)} variants, {len(high_quality_additional)} high-quality images")
             
+            # Ensure we have at least the main image
+            if main_image_url and main_image_url not in high_quality_additional:
+                high_quality_additional.insert(0, main_image_url)
+            
             for i, variant in enumerate(variants):
                 variant_type = self._get_variant_type(variant)
                 
-                if variant_type == 'color':
-                    # Color variants: Try to find color-specific images, then rotate through available
-                    color_images = [img for img in high_quality_additional if self._is_color_related_image(img, variant.get('color', ''))]
-                    if color_images:
-                        variant['images'] = [color_images[0]]
-                    elif high_quality_additional:
-                        # Rotate through available images
-                        variant['images'] = [high_quality_additional[i % len(high_quality_additional)]]
-                    else:
-                        variant['images'] = [main_image_url] if main_image_url else []
+                # Only assign images if variant doesn't have them already
+                if variant.get('images') is None:
+                    if variant_type == 'color':
+                        # Color variants: Try to find color-specific images, then rotate through available
+                        color_images = [img for img in high_quality_additional if self._is_color_related_image(img, variant.get('color', ''))]
+                        if color_images:
+                            variant['images'] = [color_images[0]]
+                        elif high_quality_additional:
+                            # Rotate through available images
+                            variant['images'] = [high_quality_additional[i % len(high_quality_additional)]]
+                        else:
+                            variant['images'] = [main_image_url] if main_image_url else []
                     
-                elif variant_type == 'size':
-                    # Size variants: Distribute different angles/views if available
-                    if high_quality_additional and len(high_quality_additional) >= 3:
-                        # Use different product angles for size variants
-                        variant['images'] = [high_quality_additional[i % len(high_quality_additional)]]
-                    else:
-                        variant['images'] = [main_image_url] if main_image_url else []
+                    elif variant_type == 'size':
+                        # Size variants: Distribute different angles/views if available
+                        if high_quality_additional and len(high_quality_additional) >= 3:
+                            # Use different product angles for size variants
+                            variant['images'] = [high_quality_additional[i % len(high_quality_additional)]]
+                        else:
+                            variant['images'] = [main_image_url] if main_image_url else []
                     
-                elif variant_type == 'storage':
-                    # Storage variants: Rotate through available images (different packages)
-                    if high_quality_additional:
-                        variant['images'] = [high_quality_additional[i % len(high_quality_additional)]]
-                    else:
-                        variant['images'] = [main_image_url] if main_image_url else []
+                    elif variant_type == 'storage':
+                        # Storage variants: Rotate through available images (different packages)
+                        if high_quality_additional:
+                            variant['images'] = [high_quality_additional[i % len(high_quality_additional)]]
+                        else:
+                            variant['images'] = [main_image_url] if main_image_url else []
                     
-                else:
-                    # Generic variants: Smart distribution of all available images
-                    if high_quality_additional:
-                        variant['images'] = [high_quality_additional[i % len(high_quality_additional)]]
                     else:
-                        variant['images'] = [main_image_url] if main_image_url else []
+                        # Generic variants: Smart distribution of all available images
+                        if high_quality_additional:
+                            variant['images'] = [high_quality_additional[i % len(high_quality_additional)]]
+                        else:
+                            variant['images'] = [main_image_url] if main_image_url else []
                 
                 logger.debug(f"Mapped variant {i} ({variant_type}): {len(variant.get('images', []))} images")
                         
@@ -4667,13 +5021,30 @@ class UniversalScraper:
                     logger.info(f"Found variant container: {selector}")
                     variants.extend(self._extract_from_container(containers[0], main_price))
             
-            # Method 2: Dropdown variants
+            # Method 2: Dropdown variants (only real product variants)
             dropdowns = soup.select('select[name*="variation"], select[id*="variation"]')
             for dropdown in dropdowns:
+                # Skip quantity selectors and other non-variant dropdowns
+                dropdown_name = dropdown.get('name', '').lower()
+                dropdown_id = dropdown.get('id', '').lower()
+                
+                # Skip if it's clearly a quantity selector
+                if any(qty_word in dropdown_name or qty_word in dropdown_id 
+                       for qty_word in ['quantity', 'qty', 'amount']):
+                    continue
+                
                 options = dropdown.select('option')
                 for option in options:
                     option_text = option.get_text(strip=True)
-                    if option_text and option_text not in ['Select', 'Choose', 'Size', 'Color']:
+                    # More strict filtering for real variants
+                    if (option_text and 
+                        option_text not in ['Select', 'Choose', 'Size', 'Color', 'Please select'] and
+                        not option_text.isdigit() and  # Skip pure numbers
+                        not re.match(r'^\d+\+?$', option_text) and  # Skip "1+", "2+", etc.
+                        len(option_text) > 1 and  # Skip single characters
+                        not option_text.startswith('Qty') and  # Skip quantity options
+                        not option_text.startswith('Quantity')):
+                        
                         variant = {
                             'option': option_text,
                             'price': main_price or 0.0,

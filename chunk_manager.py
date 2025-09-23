@@ -44,13 +44,98 @@ class ChunkManager:
         self._convert_json_to_chunks()
     
     def add_products(self, new_products: List[Dict[str, Any]]):
-        """Add new products to the chunk system (called by scraper)"""
-        self.temp_products.extend(new_products)
+        """Add new products to the chunk system (called by scraper) with deduplication"""
+        # Filter out duplicates before adding to temp products
+        filtered_products = self._filter_duplicates(new_products)
+        
+        if filtered_products:
+            self.temp_products.extend(filtered_products)
+            logger.info(f"Added {len(filtered_products)} new products (filtered {len(new_products) - len(filtered_products)} duplicates)")
         
         # If we have enough products, create a new chunk or append to existing
         if len(self.temp_products) >= 100:  # Process in batches of 100
             self._process_temp_products()
     
+    def _filter_duplicates(self, new_products: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Filter out duplicate products by checking against existing products in chunks"""
+        if not new_products:
+            return []
+        
+        # Load existing product URLs for deduplication
+        existing_urls = self._get_existing_product_urls()
+        
+        filtered_products = []
+        duplicates_found = 0
+        
+        for product in new_products:
+            source_url = product.get('source_url', '').strip()
+            product_name = product.get('product_name', '').strip().lower()
+            
+            # Skip if URL already exists
+            if source_url in existing_urls:
+                duplicates_found += 1
+                logger.debug(f"Duplicate URL skipped: {product.get('product_name', 'Unknown')[:50]}...")
+                continue
+            
+            # Additional check for similar product names from same site
+            is_duplicate = False
+            for existing_url, existing_name in existing_urls.items():
+                if (product_name == existing_name.lower() and 
+                    product.get('source_site') == self._get_site_from_url(existing_url)):
+                    is_duplicate = True
+                    duplicates_found += 1
+                    logger.debug(f"Duplicate product name skipped: {product.get('product_name', 'Unknown')[:50]}...")
+                    break
+            
+            if not is_duplicate:
+                filtered_products.append(product)
+        
+        if duplicates_found > 0:
+            logger.info(f"Filtered out {duplicates_found} duplicate products")
+        
+        return filtered_products
+    
+    def _get_existing_product_urls(self) -> Dict[str, str]:
+        """Get all existing product URLs and names from chunks for deduplication"""
+        existing_urls = {}
+        
+        try:
+            index = self._load_or_create_index()
+            
+            for chunk_info in index.get("chunks", []):
+                chunk_path = os.path.join(self.chunks_dir, chunk_info["file"])
+                
+                if os.path.exists(chunk_path):
+                    with open(chunk_path, 'r', encoding='utf-8') as f:
+                        chunk_data = json.load(f)
+                    
+                    for product in chunk_data.get("products", []):
+                        source_url = product.get('source_url', '').strip()
+                        product_name = product.get('product_name', '').strip()
+                        if source_url:
+                            existing_urls[source_url] = product_name
+                            
+        except Exception as e:
+            logger.warning(f"Error loading existing URLs for deduplication: {e}")
+        
+        return existing_urls
+    
+    def _get_site_from_url(self, url: str) -> str:
+        """Extract site name from URL"""
+        if 'amazon.com' in url:
+            return 'Amazon'
+        elif 'ebay.com' in url:
+            return 'eBay'
+        elif 'daraz.pk' in url:
+            return 'Daraz'
+        elif 'aliexpress.com' in url:
+            return 'AliExpress'
+        elif 'etsy.com' in url:
+            return 'Etsy'
+        elif 'valuebox.pk' in url:
+            return 'ValueBox'
+        return 'Unknown'
+
     def _process_temp_products(self):
         """Process temporary products and add to chunks"""
         if not self.temp_products:
