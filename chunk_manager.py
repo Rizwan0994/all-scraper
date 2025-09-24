@@ -52,9 +52,93 @@ class ChunkManager:
             self.temp_products.extend(filtered_products)
             logger.info(f"Added {len(filtered_products)} new products (filtered {len(new_products) - len(filtered_products)} duplicates)")
         
-        # If we have enough products, create a new chunk or append to existing
-        if len(self.temp_products) >= 100:  # Process in batches of 100
+        # Save immediately after each product batch (better approach)
+        if self.temp_products:
+            self._save_immediately()
+    
+    def add_single_product(self, product: Dict[str, Any]):
+        """Add and save a single product immediately (recommended for real-time saving)"""
+        # Filter duplicates
+        filtered_products = self._filter_duplicates([product])
+        
+        if filtered_products:
+            # Save immediately to persistent files
+            self._save_single_product_to_files(filtered_products[0])
+            
+            # Also add to chunk system
+            self.temp_products.extend(filtered_products)
+            logger.info(f"Saved product immediately: {filtered_products[0].get('product_name', 'Unknown')[:50]}...")
+            
+            # Process temp products if we have enough for a chunk
+            if len(self.temp_products) >= 100:
+                self._process_temp_products()
+                
+    def _save_immediately(self):
+        """Save products immediately without waiting for batch"""
+        if not self.temp_products:
+            return
+            
+        # Save to persistent JSON and CSV files immediately
+        for product in self.temp_products:
+            self._save_single_product_to_files(product)
+        
+        # Process into chunks if we have enough
+        if len(self.temp_products) >= 50:  # Reduced from 100
             self._process_temp_products()
+    
+    def _save_single_product_to_files(self, product: Dict[str, Any]):
+        """Save a single product to persistent JSON and CSV files immediately"""
+        try:
+            # Save to products.json
+            json_file = "scraped_data/products.json"
+            products = []
+            
+            # Load existing products
+            if os.path.exists(json_file):
+                try:
+                    with open(json_file, 'r', encoding='utf-8') as f:
+                        products = json.load(f)
+                except (json.JSONDecodeError, FileNotFoundError):
+                    products = []
+            
+            # Add new product
+            products.append(product)
+            
+            # Save back to file
+            with open(json_file, 'w', encoding='utf-8') as f:
+                json.dump(products, f, indent=2, ensure_ascii=False)
+            
+            # Save to products.csv
+            self._save_to_csv([product], append=True)
+            
+        except Exception as e:
+            logger.error(f"Failed to save single product: {e}")
+    
+    def _save_to_csv(self, products: List[Dict[str, Any]], append: bool = False):
+        """Save products to CSV file"""
+        try:
+            import csv
+            csv_file = "scraped_data/products.csv"
+            
+            if not products:
+                return
+                
+            mode = 'a' if append and os.path.exists(csv_file) else 'w'
+            write_header = mode == 'w' or not os.path.exists(csv_file)
+            
+            with open(csv_file, mode, newline='', encoding='utf-8') as f:
+                if products:
+                    fieldnames = products[0].keys()
+                    writer = csv.DictWriter(f, fieldnames=fieldnames)
+                    
+                    if write_header:
+                        writer.writeheader()
+                    
+                    for product in products:
+                        writer.writerow(product)
+                        
+        except Exception as e:
+            logger.error(f"Failed to save to CSV: {e}")
     
     def _filter_duplicates(self, new_products: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Filter out duplicate products by checking against existing products in chunks"""

@@ -95,8 +95,8 @@ class AIVerifier:
             try:
                 genai.configure(api_key=self.api_key)
                 
-                # Try different model names
-                model_names = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro']
+                # Try different model names - prioritize latest models with better quotas
+                model_names = ['gemini-2.0-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-pro', 'gemini-1.5-flash']
                 self.model = None
                 
                 for model_name in model_names:
@@ -129,10 +129,10 @@ class AIVerifier:
         if not variants:
             return variants
         
-        # If AI is not available, use rule-based filtering
-        if not self.enabled:
-            logger.info(f"AI not available, using rule-based variant filtering for: {product_name[:50]}...")
-            return self._filter_variants_rule_based(variants, product_name, main_price)
+        # 🚨 TEMPORARILY DISABLE AI TO FIX FAKE PRICE VARIANTS
+        # AI is creating fake price variants, so forcing rule-based filtering
+        logger.warning("AI verification temporarily disabled to fix fake price variants")
+        return self._filter_variants_rule_based(variants, product_name, main_price)
         
         try:
             logger.info(f"AI verifying {len(variants)} variants for: {product_name[:50]}...")
@@ -212,6 +212,9 @@ IMPORTANT:
             r'select',  # Placeholder text
             r'choose',  # Placeholder text
             r'please select',  # Placeholder text
+            r'^\$[\d,]+\.?\d*$',  # 🚨 PRICE STRINGS LIKE $12.99, $14.99 - FAKE VARIANTS!
+            r'^[\d,]+\.?\d*\s*usd$',  # Price with USD
+            r'^price:?\s*\$?[\d,]+\.?\d*$',  # Price labels
             r'^all departments$',  # Navigation elements
             r'^arts & crafts$',  # Navigation elements
             r'^automotive$',  # Navigation elements
@@ -243,6 +246,11 @@ IMPORTANT:
         ]
         
         for variant in variants:
+            # 🚨 REJECT FAKE PRICE VARIANTS IMMEDIATELY
+            if variant.get('type') == 'price':
+                logger.debug(f"Rejecting fake price variant: {variant}")
+                continue
+            
             # Get variant name
             variant_name = variant.get('name', variant.get('option', variant.get('color', '')))
             
@@ -2686,9 +2694,17 @@ class UniversalScraper:
             
             self.socketio.emit('stats_update', self.current_stats)
         
-        # Save to persistent files immediately for first product, then every 5 products
-        if len(self.scraped_products) == 1 or len(self.scraped_products) % 5 == 0:
-            self.save_products_periodically()
+        # 🔥 IMMEDIATE SAVE - Save each product immediately for better UX and data safety
+        try:
+            # Save single product immediately to files
+            self.chunk_manager.add_single_product(asdict(product))
+            logger.debug(f"✅ Product saved immediately: {product.product_name[:30]}...")
+        except Exception as e:
+            logger.error(f"❌ Failed to save product immediately: {e}")
+            
+            # Fallback to periodic save if immediate save fails
+            if len(self.scraped_products) % 5 == 0:
+                self.save_products_periodically()
         
         logger.info(f"Product added: {product.product_name[:50]}... ({product.source_site})")
         return True

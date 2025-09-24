@@ -431,44 +431,192 @@ class AmazonVariantExtractor:
             
         return variants
     
+    def _extract_variant_type_from_selector(self, selector: str, element) -> str:
+        """Extract variant type from selector and element context"""
+        try:
+            # Check selector for type hints
+            selector_lower = selector.lower()
+            
+            if any(x in selector_lower for x in ['style', 'color', 'colour']):
+                return 'style'
+            elif any(x in selector_lower for x in ['size', 'dimensions']):
+                return 'size'
+            elif any(x in selector_lower for x in ['storage', 'memory', 'gb', 'tb']):
+                return 'storage'
+            elif any(x in selector_lower for x in ['network', 'carrier', 'unlocked']):
+                return 'network'
+            elif any(x in selector_lower for x in ['model', 'configuration', 'config']):
+                return 'model'
+            
+            # Check element attributes and text
+            element_id = (element.get_attribute('id') or '').lower()
+            element_class = (element.get_attribute('class') or '').lower()
+            element_text = (element.text or '').lower()
+            
+            if any(x in element_id for x in ['style', 'color']):
+                return 'style'
+            elif any(x in element_id for x in ['size']):
+                return 'size'
+            elif any(x in element_id for x in ['storage', 'memory']):
+                return 'storage'
+            elif any(x in element_id for x in ['network', 'carrier']):
+                return 'network'
+            elif any(x in element_id for x in ['model', 'config']):
+                return 'model'
+            
+            # Check text content for hints
+            if any(x in element_text for x in ['gb', 'tb', 'storage']):
+                return 'storage'
+            elif any(x in element_text for x in ['att', 'verizon', 't-mobile', 'unlocked', 'carrier']):
+                return 'network'
+            elif any(x in element_text for x in ['small', 'medium', 'large', 'xl', 'xxl']):
+                return 'size'
+            
+            return 'variant'  # Default fallback
+            
+        except Exception:
+            return 'variant'
+
     def _extract_interactively(self) -> List[Dict]:
-        """Extract variants by interacting with the page"""
+        """Extract variant information by interacting with the page - ENHANCED FOR PERFECT DATA"""
         variants = []
+        found_variant_groups = []
         
         try:
-            # Find clickable variation elements
-            clickable_selectors = [
-                '.a-button-group button',
-                '.a-button-toggle-group button',
-                '[data-action="a-dropdown-button"]',
-                '.variation-container button',
-                '.variation-wrapper button'
+            logger.info("🎯 Starting ENHANCED interactive variant extraction...")
+            
+            # Enhanced selectors for variant containers
+            variant_container_selectors = [
+                # Style variants (color/design)
+                "[data-feature-name='variation'] .a-button-group .a-button",
+                "[data-feature-name='variation'] [role='radiogroup'] .a-button",
+                "#variation_style_name .a-button",
+                ".a-button-group[role='radiogroup'] .a-button",
+                "[id*='style'] .a-button",
+                
+                # Size variants
+                "#variation_size_name .a-button",
+                "[data-feature-name='size'] .a-button",
+                ".size-button-text .a-button",
+                "[id*='size'] .a-button",
+                
+                # Configuration/Model variants  
+                "[data-feature-name='configuration'] .a-button",
+                "#variation_configuration .a-button",
+                "[id*='configuration'] .a-button",
+                "[id*='model'] .a-button",
+                
+                # Storage/Memory variants
+                "#variation_storage .a-button", 
+                "[data-feature-name='storage'] .a-button",
+                "[id*='storage'] .a-button",
+                "[id*='memory'] .a-button",
+                
+                # Network/Carrier variants
+                "[data-feature-name='network'] .a-button",
+                "#variation_network .a-button",
+                "[id*='network'] .a-button",
+                "[id*='carrier'] .a-button",
+                
+                # Generic fallbacks
+                ".a-button-toggle .a-button",
+                "[data-action='a-dropdown-button'] .a-button",
+                ".a-declarative .a-button[aria-label]"
             ]
             
-            for selector in clickable_selectors:
+            for selector in variant_container_selectors:
                 try:
+                    logger.debug(f"🔍 Checking selector: {selector}")
                     elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
                     
-                    for element in elements:
-                        try:
-                            # Click the element to reveal variant information
-                            self.driver.execute_script("arguments[0].click();", element)
-                            time.sleep(1)
-                            
-                            # Extract information after click
-                            variant_info = self._extract_variant_info_after_click(element)
-                            if variant_info:
-                                variants.append(variant_info)
+                    if elements:
+                        logger.info(f"✅ Found {len(elements)} potential variants with selector: {selector}")
+                        
+                        # Extract variant type from selector/container
+                        variant_type = self._extract_variant_type_from_selector(selector, elements[0])
+                        
+                        group_variants = []
+                        for i, element in enumerate(elements):
+                            try:
+                                # Skip if element is not visible or clickable
+                                if not element.is_displayed() or not element.is_enabled():
+                                    continue
                                 
-                        except Exception as e:
-                            continue
+                                logger.info(f"🖱️ Clicking variant {i+1}/{len(elements)}: {element.text[:30]}...")
+                                
+                                # Scroll element into view
+                                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
+                                time.sleep(1)
+                                
+                                # Try multiple click methods
+                                clicked = False
+                                click_methods = [
+                                    lambda: element.click(),
+                                    lambda: self.driver.execute_script("arguments[0].click();", element),
+                                    lambda: ActionChains(self.driver).move_to_element(element).click().perform()
+                                ]
+                                
+                                for method in click_methods:
+                                    try:
+                                        method()
+                                        clicked = True
+                                        break
+                                    except Exception as e:
+                                        logger.debug(f"Click method failed: {e}")
+                                        continue
+                                
+                                if not clicked:
+                                    logger.warning(f"❌ Could not click element: {element.text}")
+                                    continue
+                                
+                                # Enhanced wait for page updates
+                                time.sleep(3)  # Increased wait time
+                                
+                                # Extract comprehensive variant data
+                                variant_data = self._extract_variant_info_after_click(element)
+                                
+                                if variant_data:
+                                    variant_data['type'] = variant_type  # Override with detected type
+                                    group_variants.append(variant_data)
+                                    logger.info(f"✅ Successfully extracted: {variant_data['name']} (${variant_data.get('price', 'N/A')})")
+                                else:
+                                    logger.warning(f"⚠️ No variant data extracted for: {element.text}")
+                                
+                                # Brief pause between clicks
+                                time.sleep(1)
+                                
+                            except Exception as e:
+                                logger.error(f"❌ Error processing variant element: {e}")
+                                continue
+                        
+                        if group_variants:
+                            variants.extend(group_variants)
+                            found_variant_groups.append({
+                                'type': variant_type,
+                                'count': len(group_variants),
+                                'selector': selector
+                            })
+                            logger.info(f"🎉 Added {len(group_variants)} {variant_type} variants")
                             
+                            # If we found a good number of variants, we can stop
+                            if len(variants) >= 15:  # Reasonable limit
+                                break
+                                
                 except Exception as e:
+                    logger.debug(f"Selector failed: {selector} - {e}")
                     continue
-                    
-        except Exception as e:
-            logger.debug(f"Interactive extraction failed: {e}")
             
+            # Final summary
+            if variants:
+                logger.info(f"🎉 EXTRACTION COMPLETE: Found {len(variants)} total variants across {len(found_variant_groups)} groups")
+                for group in found_variant_groups:
+                    logger.info(f"   📋 {group['type']}: {group['count']} variants (selector: {group['selector'][:50]}...)")
+            else:
+                logger.warning("❌ No variants found with interactive extraction")
+                
+        except Exception as e:
+            logger.error(f"❌ Interactive extraction failed: {e}")
+        
         return variants
     
     def _extract_variants_from_element(self, element) -> List[Dict]:
@@ -510,28 +658,286 @@ class AmazonVariantExtractor:
         return variants
     
     def _extract_variant_info_after_click(self, element) -> Optional[Dict]:
-        """Extract variant information after clicking an element"""
+        """Extract variant information after clicking an element - ENHANCED FOR PERFECT DATA"""
         try:
-            # Wait for any dynamic content to load
-            time.sleep(1)
+            # 🚀 ENHANCED WAIT STRATEGY - Wait longer for content to fully load
+            print(f"⏳ Waiting for variant data to load...")
+            time.sleep(4)  # Increased wait time for content to fully load
             
-            # Look for updated price or variant information
-            price_element = self.driver.find_element(By.CSS_SELECTOR, ".a-price-whole, .a-price .a-offscreen")
-            price_text = price_element.text if price_element else ""
+            # Wait for critical elements with multiple attempts
+            wait_attempts = 0
+            while wait_attempts < 3:
+                try:
+                    # Wait for price to potentially update
+                    self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".a-price, #priceblock_ourprice, #priceblock_dealprice, .a-price-whole")))
+                    time.sleep(2)  # Additional wait for full update
+                    break
+                except TimeoutException:
+                    wait_attempts += 1
+                    time.sleep(1)
             
             variant_name = element.text.strip()
+            aria_label = element.get_attribute('aria-label') or ''
+            data_value = element.get_attribute('data-value') or ''
+            title = element.get_attribute('title') or ''
             
-            if variant_name and len(variant_name) > 1:
-                return {
-                    'type': 'variant',
-                    'name': variant_name,
-                    'value': variant_name,
-                    'price': self._parse_price(price_text),
-                    'stock': 50,
-                    'sku': f"VAR-{hash(variant_name) % 10000:04d}",
-                    'images': [],
-                    'attributes': {'variant': variant_name}
+            # Get the best variant name
+            variant_name = variant_name or aria_label or data_value or title
+            
+            if not variant_name or len(variant_name) <= 1:
+                print(f"❌ No valid variant name found")
+                return None
+            
+            print(f"🔍 Extracting data for variant: {variant_name}")
+            
+            # 🎯 ENHANCED REAL VARIANT PRICE EXTRACTION
+            price = None
+            price_found = False
+            try:
+                # Enhanced price selectors with priority order
+                enhanced_price_selectors = [
+                    # Primary price locations
+                    ".a-price .a-offscreen",  # Most common
+                    ".a-price-whole",
+                    ".a-price.a-text-price.a-size-medium.apexPriceToPay .a-offscreen",
+                    
+                    # Deal and sale prices
+                    "#priceblock_dealprice",
+                    "#priceblock_ourprice", 
+                    ".a-price-range .a-offscreen",
+                    "[data-a-strike='true'] + .a-offscreen",
+                    ".a-price.a-text-price .a-offscreen",
+                    
+                    # Alternative price locations
+                    ".a-price.a-text-price.header-price .a-offscreen",
+                    ".a-price.a-text-normal .a-offscreen",
+                    ".a-button-selected .a-price .a-offscreen",
+                    
+                    # Buy box prices
+                    "#buybox .a-price .a-offscreen",
+                    "[data-feature-name='buybox'] .a-price .a-offscreen",
+                    
+                    # Variant-specific prices
+                    "[data-action='a-dropdown-button'] .a-price .a-offscreen",
+                    ".a-button-selected .a-price-whole"
+                ]
+                
+                for selector in enhanced_price_selectors:
+                    try:
+                        price_elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                        for price_element in price_elements:
+                            if price_element and price_element.is_displayed():
+                                price_text = price_element.text or price_element.get_attribute('textContent') or price_element.get_attribute('innerHTML')
+                                if price_text:
+                                    parsed_price = self._parse_price(price_text)
+                                    if parsed_price and parsed_price > 0:
+                                        price = parsed_price
+                                        price_found = True
+                                        print(f"💰 Found price ${price} for {variant_name} using selector: {selector}")
+                                        break
+                        if price_found:
+                            break
+                    except Exception as e:
+                        continue
+                        
+                # If no price found, try to extract from page text
+                if not price_found:
+                    try:
+                        page_text = self.driver.find_element(By.TAG_NAME, "body").text
+                        import re
+                        price_matches = re.findall(r'\$[\d,]+\.?\d*', page_text)
+                        if price_matches:
+                            for match in price_matches[:3]:  # Check first 3 price matches
+                                parsed_price = self._parse_price(match)
+                                if parsed_price and parsed_price > 0:
+                                    price = parsed_price
+                                    print(f"💰 Found price ${price} from page text")
+                                    break
+                    except Exception:
+                        pass
+                        
+            except Exception as e:
+                print(f"❌ Price extraction failed: {e}")
+            
+            # 🎯 ENHANCED REAL VARIANT IMAGES EXTRACTION
+            images = []
+            try:
+                print(f"🔍 Extracting images...")
+                # Wait for main image to potentially change
+                time.sleep(2)
+                
+                # Enhanced image selectors with priority
+                enhanced_image_selectors = [
+                    # Main product images
+                    "#landingImage",  # Main product image
+                    ".a-dynamic-image",  # Dynamic images
+                    "#imgTagWrapperId img",  # Image wrapper
+                    "#main-image-container img",  # Alternative main image
+                    
+                    # High resolution images
+                    "[data-old-hires]",  # High-res images
+                    "[data-a-hires]",  # Alternative high-res
+                    "[data-zoom-src]",  # Zoom images
+                    
+                    # Thumbnail and gallery images
+                    ".item.imageThumbnail img",  # Thumbnail images
+                    "#altImages img",  # Alternative images
+                    ".a-image-wrapper img",  # Alternative wrapper
+                    "#imageBlock img",  # Image block
+                    
+                    # Variant-specific images
+                    ".a-button-selected img",  # Selected variant images
+                    "[aria-selected='true'] img"  # Selected elements with images
+                ]
+                
+                collected_images = set()  # Use set to avoid duplicates
+                
+                for selector in enhanced_image_selectors:
+                    try:
+                        img_elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                        for img in img_elements:
+                            if not img.is_displayed():
+                                continue
+                                
+                            # Get various image sources with priority
+                            sources = [
+                                img.get_attribute('data-old-hires'),  # Highest quality first
+                                img.get_attribute('data-a-hires'),
+                                img.get_attribute('data-zoom-src'),
+                                img.get_attribute('src'),
+                                img.get_attribute('data-src'),
+                                img.get_attribute('data-lazy-src')
+                            ]
+                            
+                            for src in sources:
+                                if (src and 'http' in src and 
+                                    'amazon.com/images' in src and
+                                    src not in collected_images and
+                                    not any(skip in src for skip in ['spinner', 'loading', '1x1', 'spacer', 'transparent'])):
+                                    collected_images.add(src)
+                                    print(f"🖼️ Found image: {src[:80]}...")
+                                    
+                            if len(collected_images) >= 5:  # Collect more images
+                                break
+                                
+                        if len(collected_images) >= 5:  # Stop if we have enough images
+                            break
+                            
+                    except Exception as e:
+                        continue
+                
+                images = list(collected_images)[:10]  # Limit to 10 images
+                print(f"🖼️ Collected {len(images)} images for {variant_name}")
+                        
+            except Exception as e:
+                print(f"❌ Image extraction failed: {e}")
+            
+            # 🎯 ENHANCED REAL STOCK STATUS EXTRACTION
+            stock = 50  # Default
+            stock_status = "In Stock"
+            try:
+                print(f"📦 Extracting stock status...")
+                enhanced_stock_selectors = [
+                    "#availability span",
+                    ".a-color-success",
+                    ".a-color-state", 
+                    ".a-color-price",
+                    "[data-feature-name='availability'] span",
+                    "#availability .a-color-success",
+                    "#availability .a-color-state",
+                    "#buybox #availability span",
+                    ".availability-msg",
+                    "#availability",
+                    "[data-feature-name='availability']"
+                ]
+                
+                for selector in enhanced_stock_selectors:
+                    try:
+                        stock_elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                        for stock_element in stock_elements:
+                            if stock_element.is_displayed():
+                                stock_text = (stock_element.text or stock_element.get_attribute('textContent') or '').lower().strip()
+                                
+                                if not stock_text:
+                                    continue
+                                
+                                print(f"📋 Stock text found: {stock_text}")
+                                
+                                if 'in stock' in stock_text:
+                                    stock_status = "In Stock"
+                                    stock = 50
+                                elif 'out of stock' in stock_text or 'unavailable' in stock_text:
+                                    stock_status = "Out of Stock"
+                                    stock = 0
+                                elif 'only' in stock_text and 'left' in stock_text:
+                                    # Extract number from "Only 3 left in stock"
+                                    import re
+                                    match = re.search(r'only (\d+) left', stock_text)
+                                    if match:
+                                        stock = int(match.group(1))
+                                        stock_status = f"Only {stock} left"
+                                elif 'temporarily out' in stock_text:
+                                    stock_status = "Temporarily Out"
+                                    stock = 0
+                                elif any(word in stock_text for word in ['available', 'ready', 'ships']):
+                                    stock_status = "Available"
+                                    stock = 25
+                                    
+                                print(f"📦 Stock for {variant_name}: {stock_status} ({stock})")
+                                break
+                        if stock != 50:  # Found specific stock info
+                            break
+                    except Exception:
+                        continue
+                        
+            except Exception as e:
+                print(f"❌ Stock extraction failed: {e}")
+            
+            # 🎯 ENHANCED ATTRIBUTE EXTRACTION
+            additional_info = {}
+            try:
+                # Extract additional variant attributes
+                element_id = element.get_attribute('id') or ''
+                element_class = element.get_attribute('class') or ''
+                data_value = element.get_attribute('data-value') or ''
+                
+                # Try to extract color from various attributes
+                if any(color_indicator in element_class.lower() for color_indicator in ['color', 'swatch']):
+                    additional_info['color'] = variant_name
+                elif any(size_indicator in element_class.lower() for size_indicator in ['size']):
+                    additional_info['size'] = variant_name
+                elif any(storage_indicator in variant_name.lower() for storage_indicator in ['gb', 'tb', 'storage']):
+                    additional_info['storage'] = variant_name
+                
+                # Add data attributes
+                if data_value:
+                    additional_info['data_value'] = data_value
+                    
+            except Exception as e:
+                print(f"⚠️ Additional info extraction failed: {e}")
+                additional_info = {}
+
+            # 🎯 CREATE COMPREHENSIVE VARIANT DATA
+            variant_data = {
+                'type': self._detect_variant_type(element.get_attribute('id') or '', 
+                                                element.get_attribute('class') or '', 
+                                                variant_name),
+                'name': variant_name,
+                'value': variant_name,
+                'price': price,
+                'stock': stock,
+                'stock_status': stock_status,
+                'sku': f"VAR-{hash(variant_name) % 10000:04d}",
+                'images': images,
+                'attributes': {
+                    'variant': variant_name,
+                    'extracted_at': time.time(),
+                    **additional_info
                 }
+            }
+            
+            logger.info(f"✅ Extracted complete variant: {variant_name} - ${price} - {len(images)} images")
+            return variant_data
                 
         except Exception as e:
             logger.debug(f"Post-click extraction failed: {e}")
@@ -567,18 +973,53 @@ class AmazonVariantExtractor:
             return 'variant'
     
     def _parse_price(self, price_text: str) -> Optional[float]:
-        """Parse price from text"""
+        """Enhanced price parsing for better accuracy"""
         try:
             if not price_text:
                 return None
                 
-            # Remove currency symbols and extract number
+            # Clean the price text
+            price_text = price_text.strip()
+            
+            # Handle different currency formats
             import re
-            price_match = re.search(r'[\d,]+\.?\d*', price_text.replace(',', ''))
-            if price_match:
-                return float(price_match.group())
-        except:
+            
+            # Remove common currency symbols and words
+            price_text = re.sub(r'[^\d.,\-\s]', '', price_text)
+            price_text = price_text.replace('USD', '').replace('$', '').strip()
+            
+            # Handle price ranges (take the first price)
+            if '-' in price_text and not price_text.startswith('-'):
+                price_text = price_text.split('-')[0].strip()
+            
+            # Handle comma as thousands separator vs decimal
+            if ',' in price_text and '.' in price_text:
+                # Format like "1,234.56"
+                price_text = price_text.replace(',', '')
+            elif ',' in price_text and price_text.count(',') == 1:
+                # Check if it's thousands separator or decimal
+                parts = price_text.split(',')
+                if len(parts[1]) == 2:  # Likely decimal (e.g., "12,99")
+                    price_text = price_text.replace(',', '.')
+                else:  # Likely thousands (e.g., "1,234")
+                    price_text = price_text.replace(',', '')
+            
+            # Remove any remaining non-numeric characters except decimal point
+            price_text = re.sub(r'[^\d.]', '', price_text)
+            
+            if not price_text:
+                return None
+            
+            # Convert to float
+            price = float(price_text)
+            
+            # Validate reasonable price range
+            if 0.01 <= price <= 999999:
+                return round(price, 2)
+                
+        except (ValueError, AttributeError):
             pass
+            
         return None
     
     def _clean_variants(self, variants: List[Dict], main_price: float) -> List[Dict]:
