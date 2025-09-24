@@ -5052,62 +5052,81 @@ class UniversalScraper:
                 options = dropdown.select('option')
                 for option in options:
                     option_text = option.get_text(strip=True)
-                    # More strict filtering for real variants
-                    if (option_text and 
-                        option_text not in ['Select', 'Choose', 'Size', 'Color', 'Please select'] and
-                        not option_text.isdigit() and  # Skip pure numbers
-                        not re.match(r'^\d+\+?$', option_text) and  # Skip "1+", "2+", etc.
-                        len(option_text) > 1 and  # Skip single characters
-                        not option_text.startswith('Qty') and  # Skip quantity options
-                        not option_text.startswith('Quantity')):
-                        
-                        variant = {
-                            'option': option_text,
-                            'price': main_price or 0.0,
-                            'stock': 50,
-                            'sku': f"VAR-{hash(option_text) % 10000:04d}",
-                            'images': [],
-                            'attributes': {'option': option_text}
-                        }
-                        variants.append(variant)
+                    
+                    # Use enhanced cleaning method
+                    clean_name = self._clean_variant_name(option_text)
+                    if not clean_name:
+                        continue
+                    
+                    # Detect variant type
+                    variant_type = self._detect_variant_type(dropdown.get('id', ''), dropdown.get('class', ''), clean_name)
+                    
+                    variant = {
+                        'type': variant_type,
+                        'name': clean_name,
+                        'price': main_price or 0.0,
+                        'stock': 50,
+                        'sku': self._generate_unique_variant_sku('PROD', len(variants) + 1, variant_type),
+                        'images': [],
+                        'attributes': {variant_type: clean_name}
+                    }
+                    variants.append(variant)
             
             # Method 3: Button variants
             buttons = soup.select('.a-button-toggle[data-action="a-dropdown-button"], .a-button[data-action="a-dropdown-button"]')
             for button in buttons:
                 button_text = button.get_text(strip=True)
-                if button_text and len(button_text) > 1:
-                    variant = {
-                        'option': button_text,
-                        'price': main_price or 0.0,
-                        'stock': 50,
-                        'sku': f"VAR-{hash(button_text) % 10000:04d}",
-                        'images': [],
-                        'attributes': {'option': button_text}
-                    }
-                    variants.append(variant)
+                
+                # Use enhanced cleaning method
+                clean_name = self._clean_variant_name(button_text)
+                if not clean_name:
+                    continue
+                
+                # Detect variant type
+                variant_type = self._detect_variant_type(button.get('id', ''), button.get('class', ''), clean_name)
+                
+                variant = {
+                    'type': variant_type,
+                    'name': clean_name,
+                    'price': main_price or 0.0,
+                    'stock': 50,
+                    'sku': self._generate_unique_variant_sku('PROD', len(variants) + 1, variant_type),
+                    'images': [],
+                    'attributes': {variant_type: clean_name}
+                }
+                variants.append(variant)
             
             # Method 4: Color variants from images
             color_images = soup.select('[data-dp-url*="color_name"] img, .color-picker img')
             for img in color_images:
                 alt_text = img.get('alt', '')
-                if alt_text and len(alt_text) > 1:
-                    variant = {
-                        'color': alt_text,
-                        'price': main_price or 0.0,
-                        'stock': 50,
-                        'sku': f"COLOR-{hash(alt_text) % 10000:04d}",
-                        'images': [img.get('src', '')],
-                        'attributes': {'color': alt_text}
-                    }
-                    variants.append(variant)
+                
+                # Use enhanced cleaning method
+                clean_name = self._clean_variant_name(alt_text)
+                if not clean_name:
+                    continue
+                
+                variant = {
+                    'type': 'color',
+                    'name': clean_name,
+                    'price': main_price or 0.0,
+                    'stock': 50,
+                    'sku': self._generate_unique_variant_sku('PROD', len(variants) + 1, 'color'),
+                    'images': [img.get('src', '')],
+                    'attributes': {'color': clean_name}
+                }
+                variants.append(variant)
             
-            # Remove duplicates
+            # Remove duplicates and clean up
             unique_variants = []
             seen_variants = set()
-            for variant in variants:
-                variant_key = f"{variant.get('color', '')}_{variant.get('option', '')}"
+            for i, variant in enumerate(variants):
+                # Create a unique key based on name and type
+                variant_key = f"{variant.get('name', '')}_{variant.get('type', '')}"
                 if variant_key not in seen_variants and variant_key.strip():
                     seen_variants.add(variant_key)
+                    # Generate unique SKU for this variant
+                    variant['sku'] = self._generate_unique_variant_sku('PROD', len(unique_variants) + 1, variant.get('type', 'variant'))
                     unique_variants.append(variant)
             
             logger.info(f"Found {len(unique_variants)} unique variants")
@@ -5124,16 +5143,25 @@ class UniversalScraper:
             buttons = container.select('button, .a-button, .a-button-toggle, [role="radio"]')
             for button in buttons:
                 variant_text = button.get_text(strip=True)
-                if variant_text and len(variant_text) > 1:
-                    variant = {
-                        'option': variant_text,
-                        'price': main_price or 0.0,
-                        'stock': 50,
-                        'sku': f"VAR-{hash(variant_text) % 10000:04d}",
-                        'images': [],
-                        'attributes': {'option': variant_text}
-                    }
-                    variants.append(variant)
+                
+                # Use enhanced cleaning method
+                clean_name = self._clean_variant_name(variant_text)
+                if not clean_name:
+                    continue
+                
+                # Detect variant type
+                variant_type = self._detect_variant_type(button.get('id', ''), button.get('class', ''), clean_name)
+                
+                variant = {
+                    'type': variant_type,
+                    'name': clean_name,
+                    'price': main_price or 0.0,
+                    'stock': 50,
+                    'sku': self._generate_unique_variant_sku('PROD', len(variants) + 1, variant_type),
+                    'images': [],
+                    'attributes': {variant_type: clean_name}
+                }
+                variants.append(variant)
         except Exception as e:
             logger.error(f"Error extracting from container: {e}")
         return variants
@@ -5691,6 +5719,54 @@ class UniversalScraper:
             return None
         
         return clean_text
+    
+    def _clean_variant_name(self, text):
+        """Enhanced variant name cleaning to remove pricing artifacts and placeholder text"""
+        if not text:
+            return None
+        
+        # Remove pricing patterns with newlines
+        text = re.sub(r'\$\d+\.?\d*\s*\n?\s*\$\d+\.?\d*', '', text)  # Remove "$9.98\n$15.99"
+        text = re.sub(r'\$\d+\.?\d*', '', text)  # Remove "$9.98"
+        text = re.sub(r'\n+', ' ', text)  # Replace newlines with spaces
+        
+        # Remove common pricing artifacts
+        text = re.sub(r'\d+% off', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'limited time deal', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'with \d+ percent savings?', '', text, flags=re.IGNORECASE)
+        
+        # Remove common prefixes and suffixes
+        text = re.sub(r'^(color|size|variant|option):\s*', '', text, flags=re.IGNORECASE)
+        text = re.sub(r':\s*$', '', text)  # Remove trailing colons
+        
+        # Remove placeholder text
+        placeholder_patterns = [
+            'see available options', 'select', 'choose', 'please select',
+            'click to select', 'add to list', 'update page', 'quantity', 'qty'
+        ]
+        
+        text_lower = text.strip().lower()
+        if any(pattern in text_lower for pattern in placeholder_patterns):
+            return None
+        
+        # Clean up whitespace and validate
+        clean_text = re.sub(r'\s+', ' ', text).strip()
+        
+        # Return only if meaningful text remains
+        if len(clean_text) < 2 or len(clean_text) > 50:
+            return None
+        
+        # Return title case for better formatting
+        return clean_text.title()
+    
+    def _generate_unique_variant_sku(self, product_id, variant_index, variant_type):
+        """Generate unique SKU for each variant"""
+        # Use product ID + variant index + type for uniqueness
+        # Create a hash from product_id to make it shorter but unique
+        product_hash = abs(hash(product_id)) % 1000
+        base_sku = f"VAR-{product_hash:03d}-{variant_index:03d}"
+        type_suffix = variant_type.upper()[:3] if variant_type else "VAR"
+        return f"{base_sku}-{type_suffix}"
     
     def _create_storage_variant(self, clean_text, element, main_price):
         """Create a storage variant object"""

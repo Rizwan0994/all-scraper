@@ -573,14 +573,19 @@ class AmazonVariantExtractor:
                                 time.sleep(3)  # Increased wait time
                                 
                                 # Extract comprehensive variant data
-                                variant_data = self._extract_variant_info_after_click(element)
-                                
-                                if variant_data:
-                                    variant_data['type'] = variant_type  # Override with detected type
-                                    group_variants.append(variant_data)
-                                    logger.info(f"✅ Successfully extracted: {variant_data['name']} (${variant_data.get('price', 'N/A')})")
-                                else:
-                                    logger.warning(f"⚠️ No variant data extracted for: {element.text}")
+                                try:
+                                    variant_data = self._extract_variant_info_after_click(element)
+                                    
+                                    if variant_data:
+                                        variant_data['type'] = variant_type  # Override with detected type
+                                        group_variants.append(variant_data)
+                                        logger.info(f"✅ Successfully extracted: {variant_data['name']} (${variant_data.get('price', 'N/A')})")
+                                    else:
+                                        logger.warning(f"⚠️ No variant data extracted for: {element.text}")
+                                except Exception as e:
+                                    logger.error(f"❌ Error extracting variant data for {element.text}: {e}")
+                                    # Continue with next variant instead of stopping
+                                    continue
                                 
                                 # Brief pause between clicks
                                 time.sleep(1)
@@ -691,207 +696,21 @@ class AmazonVariantExtractor:
             print(f"🔍 Extracting data for variant: {variant_name}")
             
             # 🎯 ENHANCED REAL VARIANT PRICE EXTRACTION
-            price = None
-            price_found = False
-            try:
-                # Enhanced price selectors with priority order
-                enhanced_price_selectors = [
-                    # Primary price locations
-                    ".a-price .a-offscreen",  # Most common
-                    ".a-price-whole",
-                    ".a-price.a-text-price.a-size-medium.apexPriceToPay .a-offscreen",
-                    
-                    # Deal and sale prices
-                    "#priceblock_dealprice",
-                    "#priceblock_ourprice", 
-                    ".a-price-range .a-offscreen",
-                    "[data-a-strike='true'] + .a-offscreen",
-                    ".a-price.a-text-price .a-offscreen",
-                    
-                    # Alternative price locations
-                    ".a-price.a-text-price.header-price .a-offscreen",
-                    ".a-price.a-text-normal .a-offscreen",
-                    ".a-button-selected .a-price .a-offscreen",
-                    
-                    # Buy box prices
-                    "#buybox .a-price .a-offscreen",
-                    "[data-feature-name='buybox'] .a-price .a-offscreen",
-                    
-                    # Variant-specific prices
-                    "[data-action='a-dropdown-button'] .a-price .a-offscreen",
-                    ".a-button-selected .a-price-whole"
-                ]
-                
-                for selector in enhanced_price_selectors:
-                    try:
-                        price_elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                        for price_element in price_elements:
-                            if price_element and price_element.is_displayed():
-                                price_text = price_element.text or price_element.get_attribute('textContent') or price_element.get_attribute('innerHTML')
-                                if price_text:
-                                    parsed_price = self._parse_price(price_text)
-                                    if parsed_price and parsed_price > 0:
-                                        price = parsed_price
-                                        price_found = True
-                                        print(f"💰 Found price ${price} for {variant_name} using selector: {selector}")
-                                        break
-                        if price_found:
-                            break
-                    except Exception as e:
-                        continue
-                        
-                # If no price found, try to extract from page text
-                if not price_found:
-                    try:
-                        page_text = self.driver.find_element(By.TAG_NAME, "body").text
-                        import re
-                        price_matches = re.findall(r'\$[\d,]+\.?\d*', page_text)
-                        if price_matches:
-                            for match in price_matches[:3]:  # Check first 3 price matches
-                                parsed_price = self._parse_price(match)
-                                if parsed_price and parsed_price > 0:
-                                    price = parsed_price
-                                    print(f"💰 Found price ${price} from page text")
-                                    break
-                    except Exception:
-                        pass
-                        
-            except Exception as e:
-                print(f"❌ Price extraction failed: {e}")
+            price = self._fetch_variant_specific_price()
+            if not price:
+                price = main_price  # Fallback to main price
             
             # 🎯 ENHANCED REAL VARIANT IMAGES EXTRACTION
-            images = []
             try:
-                print(f"🔍 Extracting images...")
-                # Wait for main image to potentially change
-                time.sleep(2)
-                
-                # Enhanced image selectors with priority
-                enhanced_image_selectors = [
-                    # Main product images
-                    "#landingImage",  # Main product image
-                    ".a-dynamic-image",  # Dynamic images
-                    "#imgTagWrapperId img",  # Image wrapper
-                    "#main-image-container img",  # Alternative main image
-                    
-                    # High resolution images
-                    "[data-old-hires]",  # High-res images
-                    "[data-a-hires]",  # Alternative high-res
-                    "[data-zoom-src]",  # Zoom images
-                    
-                    # Thumbnail and gallery images
-                    ".item.imageThumbnail img",  # Thumbnail images
-                    "#altImages img",  # Alternative images
-                    ".a-image-wrapper img",  # Alternative wrapper
-                    "#imageBlock img",  # Image block
-                    
-                    # Variant-specific images
-                    ".a-button-selected img",  # Selected variant images
-                    "[aria-selected='true'] img"  # Selected elements with images
-                ]
-                
-                collected_images = set()  # Use set to avoid duplicates
-                
-                for selector in enhanced_image_selectors:
-                    try:
-                        img_elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                        for img in img_elements:
-                            if not img.is_displayed():
-                                continue
-                                
-                            # Get various image sources with priority
-                            sources = [
-                                img.get_attribute('data-old-hires'),  # Highest quality first
-                                img.get_attribute('data-a-hires'),
-                                img.get_attribute('data-zoom-src'),
-                                img.get_attribute('src'),
-                                img.get_attribute('data-src'),
-                                img.get_attribute('data-lazy-src')
-                            ]
-                            
-                            for src in sources:
-                                if (src and 'http' in src and 
-                                    'amazon.com/images' in src and
-                                    src not in collected_images and
-                                    not any(skip in src for skip in ['spinner', 'loading', '1x1', 'spacer', 'transparent'])):
-                                    collected_images.add(src)
-                                    print(f"🖼️ Found image: {src[:80]}...")
-                                    
-                            if len(collected_images) >= 5:  # Collect more images
-                                break
-                                
-                        if len(collected_images) >= 5:  # Stop if we have enough images
-                            break
-                            
-                    except Exception as e:
-                        continue
-                
-                images = list(collected_images)[:10]  # Limit to 10 images
-                print(f"🖼️ Collected {len(images)} images for {variant_name}")
-                        
+                images = self._fetch_variant_specific_images()
+                print(f"🖼️ Collected {len(images)} variant-specific media for {variant_name}")
             except Exception as e:
-                print(f"❌ Image extraction failed: {e}")
+                print(f"⚠️ Image extraction failed for {variant_name}: {e}")
+                images = []  # Don't let image extraction stop the scraper
             
             # 🎯 ENHANCED REAL STOCK STATUS EXTRACTION
-            stock = 50  # Default
-            stock_status = "In Stock"
-            try:
-                print(f"📦 Extracting stock status...")
-                enhanced_stock_selectors = [
-                    "#availability span",
-                    ".a-color-success",
-                    ".a-color-state", 
-                    ".a-color-price",
-                    "[data-feature-name='availability'] span",
-                    "#availability .a-color-success",
-                    "#availability .a-color-state",
-                    "#buybox #availability span",
-                    ".availability-msg",
-                    "#availability",
-                    "[data-feature-name='availability']"
-                ]
-                
-                for selector in enhanced_stock_selectors:
-                    try:
-                        stock_elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                        for stock_element in stock_elements:
-                            if stock_element.is_displayed():
-                                stock_text = (stock_element.text or stock_element.get_attribute('textContent') or '').lower().strip()
-                                
-                                if not stock_text:
-                                    continue
-                                
-                                print(f"📋 Stock text found: {stock_text}")
-                                
-                                if 'in stock' in stock_text:
-                                    stock_status = "In Stock"
-                                    stock = 50
-                                elif 'out of stock' in stock_text or 'unavailable' in stock_text:
-                                    stock_status = "Out of Stock"
-                                    stock = 0
-                                elif 'only' in stock_text and 'left' in stock_text:
-                                    # Extract number from "Only 3 left in stock"
-                                    import re
-                                    match = re.search(r'only (\d+) left', stock_text)
-                                    if match:
-                                        stock = int(match.group(1))
-                                        stock_status = f"Only {stock} left"
-                                elif 'temporarily out' in stock_text:
-                                    stock_status = "Temporarily Out"
-                                    stock = 0
-                                elif any(word in stock_text for word in ['available', 'ready', 'ships']):
-                                    stock_status = "Available"
-                                    stock = 25
-                                    
-                                print(f"📦 Stock for {variant_name}: {stock_status} ({stock})")
-                                break
-                        if stock != 50:  # Found specific stock info
-                            break
-                    except Exception:
-                        continue
-                        
-            except Exception as e:
-                print(f"❌ Stock extraction failed: {e}")
+            stock = self._fetch_variant_specific_stock()
+            stock_status = "In Stock" if stock > 0 else "Out of Stock"
             
             # 🎯 ENHANCED ATTRIBUTE EXTRACTION
             additional_info = {}
@@ -918,19 +737,21 @@ class AmazonVariantExtractor:
                 additional_info = {}
 
             # 🎯 CREATE COMPREHENSIVE VARIANT DATA
+            variant_type = self._detect_variant_type(element.get_attribute('id') or '', 
+                                                   element.get_attribute('class') or '', 
+                                                   variant_name)
+            
             variant_data = {
-                'type': self._detect_variant_type(element.get_attribute('id') or '', 
-                                                element.get_attribute('class') or '', 
-                                                variant_name),
+                'type': variant_type,
                 'name': variant_name,
                 'value': variant_name,
                 'price': price,
                 'stock': stock,
                 'stock_status': stock_status,
-                'sku': f"VAR-{hash(variant_name) % 10000:04d}",
+                'sku': f"VAR-{abs(hash(variant_name)) % 1000:03d}-{variant_type.upper()[:3]}",
                 'images': images,
                 'attributes': {
-                    'variant': variant_name,
+                    variant_type: variant_name,
                     'extracted_at': time.time(),
                     **additional_info
                 }
@@ -943,6 +764,318 @@ class AmazonVariantExtractor:
             logger.debug(f"Post-click extraction failed: {e}")
             
         return None
+    
+    def _fetch_variant_specific_images(self) -> List[str]:
+        """Fetch HIGH-QUALITY images and videos that are specific to the currently selected variant"""
+        media_urls = []
+        try:
+            # Wait for images to load after variant selection
+            time.sleep(3)
+            
+            # HIGH-QUALITY image selectors (prioritize main product images)
+            high_quality_selectors = [
+                '#landingImage',  # Main product image (highest priority)
+                '#imgTagWrapperId img',  # Main image wrapper
+                '#main-image-container img',  # Alternative main image
+                '.a-dynamic-image',  # Dynamic images
+                '#imageBlock img',  # Image block
+                '.a-image-wrapper img',  # Alternative wrapper
+                '#altImages img',  # Alternative images
+            ]
+            
+            # Also check for video elements
+            video_selectors = [
+                'video',  # Video elements
+                '[data-video-url]',  # Elements with video URLs
+                '.video-container',  # Video containers
+                '.a-button[data-video]',  # Video buttons
+            ]
+            
+            collected_media = set()  # Use set to avoid duplicates
+            
+            # Fetch images
+            for selector in high_quality_selectors:
+                try:
+                    img_elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    for img in img_elements:
+                        if not img.is_displayed():
+                            continue
+                            
+                        # Get HIGH-QUALITY image URLs with priority
+                        sources = [
+                            img.get_attribute('data-old-hires'),  # Highest quality (2048px+)
+                            img.get_attribute('data-a-hires'),    # High quality (1024px+)
+                            img.get_attribute('data-zoom-src'),   # Zoom quality
+                            img.get_attribute('src'),             # Standard quality
+                        ]
+                        
+                        for src in sources:
+                            if src:
+                                if self._is_high_quality_image(src):
+                                    if src not in collected_media:
+                                        collected_media.add(src)
+                                        print(f"🖼️ Found HIGH-QUALITY variant image: {src[:80]}...")
+                                elif self._is_video_link(src):
+                                    if src not in collected_media:
+                                        collected_media.add(src)
+                                        print(f"🎥 Found variant video: {src[:80]}...")
+                                    
+                        if len(collected_media) >= 5:  # Collect up to 5 media items
+                            break
+                            
+                    if len(collected_media) >= 5:  # Stop if we have enough media
+                        break
+                        
+                except Exception as e:
+                    print(f"⚠️ Error with selector {selector}: {e}")
+                    continue
+            
+            # Fetch videos
+            for selector in video_selectors:
+                try:
+                    video_elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    for element in video_elements:
+                        if not element.is_displayed():
+                            continue
+                            
+                        # Extract video URL
+                        video_url = self._extract_video_url(element)
+                        if video_url and video_url not in collected_media:
+                            collected_media.add(video_url)
+                            print(f"🎥 Found variant video: {video_url[:80]}...")
+                            
+                        if len(collected_media) >= 5:  # Stop if we have enough media
+                            break
+                            
+                except Exception as e:
+                    print(f"⚠️ Error with video selector {selector}: {e}")
+                    continue
+            
+            media_urls = list(collected_media)[:5]  # Limit to 5 media items per variant
+            
+            # If no media found, try fallback approach
+            if not media_urls:
+                print("⚠️ No variant-specific media found, trying fallback...")
+                media_urls = self._fallback_media_extraction()
+            
+        except Exception as e:
+            print(f"❌ Error fetching variant media: {e}")
+            # Don't let this stop the scraper - return empty list and continue
+            media_urls = []
+        
+        return media_urls
+    
+    def _fallback_media_extraction(self) -> List[str]:
+        """Fallback method to extract any available media when variant-specific extraction fails"""
+        fallback_media = []
+        try:
+            # Try to get any available images from the page
+            fallback_selectors = [
+                'img[src*="amazon.com/images"]',  # Any Amazon images
+                'video[src]',  # Any videos
+                '[data-src*="amazon.com/images"]',  # Lazy-loaded images
+            ]
+            
+            for selector in fallback_selectors:
+                try:
+                    elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    for element in elements:
+                        if not element.is_displayed():
+                            continue
+                            
+                        src = element.get_attribute('src') or element.get_attribute('data-src')
+                        if src and 'amazon.com' in src:
+                            if self._is_high_quality_image(src) or self._is_video_link(src):
+                                if src not in fallback_media:
+                                    fallback_media.append(src)
+                                    print(f"🔄 Fallback media found: {src[:80]}...")
+                                    
+                        if len(fallback_media) >= 2:  # Limit fallback to 2 items
+                            break
+                            
+                    if len(fallback_media) >= 2:
+                        break
+                        
+                except Exception as e:
+                    continue
+                    
+        except Exception as e:
+            print(f"⚠️ Fallback media extraction failed: {e}")
+        
+        return fallback_media
+    
+    def _is_high_quality_image(self, src: str) -> bool:
+        """Check if image URL is high quality and valid"""
+        if not src or 'http' not in src or 'amazon.com/images' not in src:
+            return False
+        
+        # REJECT low-quality patterns
+        low_quality_patterns = [
+            'SX38_SY50',  # 38x50 pixels (tiny)
+            'SX50_SY50',  # 50x50 pixels (tiny)
+            'SX75_SY75',  # 75x75 pixels (small)
+            'CR,0,0,38,50',  # Cropped to tiny size
+            'CR,0,0,50,50',  # Cropped to small size
+            'spinner',  # Loading spinner
+            'loading',  # Loading image
+            '1x1',  # 1x1 pixel
+            'spacer',  # Spacer image
+            'transparent',  # Transparent image
+        ]
+        
+        # Check for low-quality patterns
+        for pattern in low_quality_patterns:
+            if pattern in src:
+                return False
+        
+        # ACCEPT high-quality patterns
+        high_quality_patterns = [
+            'SX679',  # 679px width (good quality)
+            'SX1024',  # 1024px width (high quality)
+            'SX2048',  # 2048px width (very high quality)
+            'AC_SX679',  # Amazon's standard high quality
+            'AC_SX1024',  # Amazon's high quality
+            'AC_SX2048',  # Amazon's very high quality
+        ]
+        
+        # Check for high-quality patterns
+        for pattern in high_quality_patterns:
+            if pattern in src:
+                return True
+        
+        # If no specific quality indicators, check if it's not obviously low quality
+        return 'SX' not in src or any(size in src for size in ['679', '1024', '2048'])
+    
+    def _is_video_link(self, src: str) -> bool:
+        """Check if URL is a video link"""
+        if not src:
+            return False
+        
+        video_indicators = [
+            'play-button-overlay',
+            'PKmb-play-button-overlay-thumb',
+            'video',
+            'mp4',
+            'webm',
+            'mov',
+            'avi',
+            'youtube.com',
+            'youtu.be',
+            'vimeo.com'
+        ]
+        
+        return any(indicator in src.lower() for indicator in video_indicators)
+    
+    def _extract_video_url(self, element) -> Optional[str]:
+        """Extract video URL from element if it's a video"""
+        try:
+            # Check for video data attributes
+            video_sources = [
+                element.get_attribute('data-video-url'),
+                element.get_attribute('data-video-src'),
+                element.get_attribute('data-src'),
+                element.get_attribute('src')
+            ]
+            
+            for src in video_sources:
+                if src and self._is_video_link(src):
+                    return src
+            
+            # Check for video elements
+            video_element = element.find_element(By.TAG_NAME, "video")
+            if video_element:
+                src = video_element.get_attribute('src')
+                if src:
+                    return src
+                    
+        except Exception:
+            pass
+        
+        return None
+    
+    def _fetch_variant_specific_price(self) -> Optional[float]:
+        """Fetch actual price for the selected variant"""
+        try:
+            # Enhanced price selectors with priority order
+            price_selectors = [
+                ".a-price .a-offscreen",  # Most common
+                ".a-price-whole",
+                ".a-price.a-text-price.a-size-medium.apexPriceToPay .a-offscreen",
+                "#priceblock_dealprice",
+                "#priceblock_ourprice", 
+                ".a-price-range .a-offscreen",
+                "[data-a-strike='true'] + .a-offscreen",
+                ".a-price.a-text-price .a-offscreen",
+                ".a-button-selected .a-price .a-offscreen",
+                ".a-button-selected .a-price-whole"
+            ]
+            
+            for selector in price_selectors:
+                try:
+                    price_elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    for price_element in price_elements:
+                        if price_element and price_element.is_displayed():
+                            price_text = price_element.text or price_element.get_attribute('textContent')
+                            if price_text:
+                                parsed_price = self._parse_price(price_text)
+                                if parsed_price and parsed_price > 0:
+                                    print(f"💰 Found variant price ${parsed_price}")
+                                    return parsed_price
+                except Exception as e:
+                    continue
+                    
+        except Exception as e:
+            print(f"❌ Error fetching variant price: {e}")
+        
+        return None
+    
+    def _fetch_variant_specific_stock(self) -> int:
+        """Fetch actual stock information for the selected variant"""
+        try:
+            stock_selectors = [
+                '#availability span',
+                '.a-color-success',
+                '.a-color-state',
+                '#availability .a-color-success',
+                '#buybox #availability span',
+                '.availability-msg',
+                '#availability'
+            ]
+            
+            for selector in stock_selectors:
+                try:
+                    stock_elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    for stock_element in stock_elements:
+                        if stock_element.is_displayed():
+                            stock_text = (stock_element.text or '').lower().strip()
+                            
+                            if not stock_text:
+                                continue
+                            
+                            print(f"📋 Stock text found: {stock_text}")
+                            
+                            if 'in stock' in stock_text:
+                                # Try to extract quantity
+                                import re
+                                match = re.search(r'only (\d+) left', stock_text)
+                                if match:
+                                    stock = int(match.group(1))
+                                    print(f"📦 Stock: {stock}")
+                                    return stock
+                                return 50  # Default in stock
+                            elif 'out of stock' in stock_text or 'unavailable' in stock_text:
+                                print(f"📦 Stock: 0 (out of stock)")
+                                return 0
+                            elif 'temporarily out' in stock_text:
+                                print(f"📦 Stock: 0 (temporarily out)")
+                                return 0
+                except Exception:
+                    continue
+                    
+        except Exception as e:
+            print(f"❌ Error fetching variant stock: {e}")
+        
+        return 50  # Default fallback
     
     def _detect_variant_type(self, element_id: str, element_class: str, variant_text: str) -> str:
         """Detect the type of variant based on context"""
