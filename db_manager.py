@@ -338,23 +338,39 @@ class DatabaseManager:
                 variation_id = cursor.lastrowid
                 logger.info(f"Created DEFAULT variant with ID: {variation_id} for product_id: {product_id}")
                 
-                # Insert additional images as variant images for the default variant
+                # Insert ALL additional images to the default variant (since it's the only variant)
+                additional_images = product.get('additional_images', [])
                 main_images = product.get('product_images', [])
+                
+                # Collect all images for default variant
+                all_default_images = []
+                
+                # Add main images (except first which is thumbnail)
                 if len(main_images) > 1:
-                    # Additional images go to the default variant
-                    for img_url in main_images[1:]:
-                        if img_url and img_url.strip():
-                            self._insert_variant_image(cursor, variation_id, img_url, product)
+                    all_default_images.extend(main_images[1:])
+                
+                # Add all additional images
+                if additional_images:
+                    all_default_images.extend(additional_images)
+                
+                # Insert all collected images
+                if all_default_images:
+                    logger.info(f"Adding {len(all_default_images)} images to default variant")
+                    self._insert_variant_images(cursor, variation_id, all_default_images, product)
                 else:
-                    # If no additional images, use main image for the default variant
+                    # If no additional images, use main image as fallback
                     if main_images and main_images[0]:
                         self._insert_variant_image(cursor, variation_id, main_images[0], product)
                 
             else:
                 # Insert each variant
-                for variant in variants:
+                additional_images = product.get('additional_images', [])
+                for i, variant in enumerate(variants):
+                    # Clean variant name - remove prices and newlines
+                    clean_variant_name = self._clean_variant_name(variant.get('name', ''))
+                    
                     # Build combination string using ID-based format parentId:childId|parentId:childId
-                    combination = self._build_variant_combination(cursor, variant, product, product_id)
+                    combination = self._build_variant_combination(cursor, variant, product, product_id, clean_variant_name)
 
                     insert_query = """
                     INSERT INTO product_variations (
@@ -380,12 +396,25 @@ class DatabaseManager:
                     )
                     cursor.execute(insert_query, values)
                     variation_id = cursor.lastrowid
-                    logger.info(f"Inserted variation with ID: {variation_id}")
+                    logger.info(f"Inserted variation with ID: {variation_id}, name: {clean_variant_name}")
                     
-                    # Insert variant-specific images if they exist, otherwise use main product image
+                    # Insert variant-specific images
                     variant_images = variant.get('images', [])
+                    all_variant_images = []
+                    
+                    # Add variant-specific images
                     if variant_images:
-                        self._insert_variant_images(cursor, variation_id, variant_images, product)
+                        all_variant_images.extend(variant_images)
+                    
+                    # Add additional_images to FIRST variant only
+                    if i == 0 and additional_images:
+                        logger.info(f"Adding {len(additional_images)} additional_images to first variant")
+                        all_variant_images.extend(additional_images)
+                    
+                    # Insert all collected images for this variant
+                    if all_variant_images:
+                        self._insert_variant_images(cursor, variation_id, all_variant_images, product)
+                        logger.info(f"Inserted {len(all_variant_images)} images for variant ID: {variation_id}")
                     else:
                         # If variant has no images, use main product image as fallback
                         main_images = product.get('product_images', [])
@@ -395,26 +424,60 @@ class DatabaseManager:
                     
         except Exception as e:
             logger.error(f"Error inserting product variations: {e}")
+    
+    def _clean_variant_name(self, variant_name):
+        """Clean variant name by removing prices, newlines, and extra text"""
+        try:
+            if not variant_name:
+                return ""
+            
+            # Remove prices ($xx.xx format)
+            import re
+            clean_name = re.sub(r'\$[\d,]+\.?\d*', '', variant_name)
+            
+            # Remove newlines and excessive whitespace
+            clean_name = re.sub(r'\n+', ' ', clean_name)
+            clean_name = re.sub(r'\s+', ' ', clean_name)
+            
+            # Remove common separators and clean up
+            clean_name = clean_name.replace('|', ',').strip()
+            
+            # Fix multiple spaces and clean up spacing around commas
+            clean_name = re.sub(r'\s*,\s*', ', ', clean_name)
+            clean_name = re.sub(r'\s+', ' ', clean_name)
+            
+            # Remove leading/trailing commas or pipes
+            clean_name = clean_name.strip('|, ').strip()
+            
+            logger.info(f"Cleaned variant name: '{variant_name}' -> '{clean_name}'")
+            return clean_name
+            
+        except Exception as e:
+            logger.error(f"Error cleaning variant name: {e}")
+            return variant_name or ""
 
-    def _build_variant_combination(self, cursor, variant, product, product_id):
+    def _build_variant_combination(self, cursor, variant, product, product_id, clean_name=None):
         """Create ID-based combination string for a variant and ensure product_attributes links.
 
         Supports variant option structures like:
         - variant['options'] as dict { name: value }
         - variant['options'] as list of { name, value }
         - variant['attributes'] similar to options
-        Falls back to empty string if nothing found.
+        - Parsed from clean_name for better attribute extraction
         """
         try:
             option_pairs = []  # list of (parent_id, child_id)
 
-            # Extract options
+            # Extract options from standard fields
             possible_keys = ['options', 'attributes']
             found_map = {}
             for key in possible_keys:
                 raw = variant.get(key)
                 if isinstance(raw, dict):
-                    found_map.update(raw)
+                    # Skip generic 'variant' key with full text value
+                    for k, v in raw.items():
+                        if k.lower() != 'variant':  # Skip generic variant field
+                            found_map[k] = v
                 elif isinstance(raw, list):
                     for item in raw:
                         name = (item or {}).get('name')
@@ -422,15 +485,30 @@ class DatabaseManager:
                         if name is not None and value is not None:
                             found_map[name] = value
 
-            # If no options in variant, try product-level attributes for single attribute variant
-            if not found_map and isinstance(product.get('attributes'), dict):
-                found_map = product.get('attributes')
+            # If no proper options found, try to parse from clean_name
+            if not found_map and clean_name:
+                parsed_attributes = self._parse_variant_attributes_from_name(clean_name)
+                found_map.update(parsed_attributes)
+                logger.info(f"Parsed attributes from name '{clean_name}': {parsed_attributes}")
 
+            # If still no options, try product-level attributes for single attribute variant
+            if not found_map and isinstance(product.get('attributes'), dict):
+                product_attrs = product.get('attributes')
+                for k, v in product_attrs.items():
+                    if k.lower() != 'variant':  # Skip generic variant field
+                        found_map[k] = v
+
+            # Create attribute pairs
             for name, value in found_map.items():
-                if value is None:
+                if value is None or str(value).strip() == '':
                     continue
-                parent_id = self._get_or_create_attribute_parent(cursor, str(name))
-                child_id = self._get_or_create_attribute_value(cursor, parent_id, str(value))
+                    
+                # Clean attribute name and value
+                clean_attr_name = str(name).strip()
+                clean_attr_value = str(value).strip()
+                
+                parent_id = self._get_or_create_attribute_parent(cursor, clean_attr_name)
+                child_id = self._get_or_create_attribute_value(cursor, parent_id, clean_attr_value)
                 option_pairs.append((parent_id, child_id))
 
                 # Ensure product_attributes rows exist
@@ -438,15 +516,70 @@ class DatabaseManager:
                 self._ensure_product_attribute_link(cursor, product_id, child_id, 'child')
 
             if not option_pairs:
-                return ''
+                logger.warning(f"No valid attributes found for variant: {variant.get('name', 'Unknown')}")
+                return 'single_combination'
 
             # Sort by parent_id and format
             option_pairs.sort(key=lambda p: p[0])
             combo = '|'.join([f"{pid}:{cid}" for pid, cid in option_pairs])
+            logger.info(f"Generated combination: {combo} from {len(option_pairs)} attributes")
             return combo
+            
         except Exception as e:
             logger.error(f"Error building variant combination: {e}")
-            return ''
+            return 'default_combination'
+    
+    def _parse_variant_attributes_from_name(self, variant_name):
+        """Parse attributes from variant name like '8GB RAM, 288GB Storage' or '16GB | 288GB Storage'"""
+        try:
+            import re
+            attributes = {}
+            
+            if not variant_name or variant_name.strip() == '':
+                return attributes
+            
+            # Common patterns to extract attributes
+            patterns = [
+                # RAM patterns: 8GB, 16GB, etc.
+                (r'(\d+)\s*GB(?:\s+RAM)?', 'RAM'),
+                # Storage patterns: 288GB Storage, 512GB SSD, etc.
+                (r'(\d+)\s*GB\s+(?:Storage|SSD|storage)', 'Storage'),  
+                # Size patterns: Small, Medium, Large, XL, etc.
+                (r'\b(XS|S|M|L|XL|XXL|XXXL|Small|Medium|Large|Extra Large)\b', 'Size'),
+                # Color patterns: Red, Blue, Black, etc.
+                (r'\b(Red|Blue|Black|White|Green|Yellow|Pink|Purple|Orange|Brown|Gray|Grey|Silver|Gold)\b', 'Color'),
+                # Material patterns
+                (r'\b(Cotton|Leather|Polyester|Silk|Wool|Linen|Denim)\b', 'Material'),
+            ]
+            
+            # Try to extract using patterns
+            for pattern, attr_name in patterns:
+                matches = re.findall(pattern, variant_name, re.IGNORECASE)
+                if matches:
+                    if attr_name in ['RAM', 'Storage']:
+                        # For RAM and Storage, add GB unit
+                        attributes[attr_name] = f"{matches[0]}GB"
+                    else:
+                        # For other attributes, use as-is
+                        attributes[attr_name] = matches[0]
+            
+            # If no patterns matched, try simple comma/pipe separation
+            if not attributes:
+                # Split by common separators
+                parts = re.split(r'[|,]', variant_name)
+                for i, part in enumerate(parts):
+                    part = part.strip()
+                    if part and len(part) < 50:  # Avoid very long strings
+                        # Use generic attribute names
+                        attr_name = f"Option_{i+1}" if len(parts) > 1 else "Option"
+                        attributes[attr_name] = part
+            
+            logger.info(f"Parsed attributes from '{variant_name}': {attributes}")
+            return attributes
+            
+        except Exception as e:
+            logger.error(f"Error parsing variant attributes from name: {e}")
+            return {}
 
     def _collect_product_attribute_values(self, product):
         """Return mapping attr_name -> set(values) from product-level fields and variants."""
