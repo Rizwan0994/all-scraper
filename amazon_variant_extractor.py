@@ -57,7 +57,7 @@ class AmazonVariantExtractor:
             variants.extend(self._extract_from_data_attributes())
             
             # Method 6: Interactive extraction (click and extract)
-            variants.extend(self._extract_interactively())
+            variants.extend(self._extract_interactively(main_price))
             
             # Clean and deduplicate variants
             variants = self._clean_variants(variants, main_price)
@@ -86,45 +86,48 @@ class AmazonVariantExtractor:
             logger.warning("Page load timeout, continuing anyway")
     
     def _extract_from_variation_containers(self) -> List[Dict]:
-        """Extract variants from Amazon's variation containers"""
+        """Extract variants from Amazon's variation containers - FIXED TO TARGET REAL VARIANT BUTTONS"""
         variants = []
         
         try:
-            # Common variation container selectors
+            # FIXED: Target actual clickable variant buttons, not summary text
             selectors = [
-                '#variation_color_name',
-                '#variation_size_name', 
-                '#variation_storage_name',
-                '#variation_style_name',
-                '#variation_pattern_name',
-                '#variation_material_name',
-                '#variation_edition_name',
-                '#variation_format_name',
-                '#variation_platform_name',
-                '#variation_operating_system_name',
-                '#variation_connectivity_technology_name',
-                '#variation_screen_size_name',
-                '#variation_resolution_name',
-                '#variation_cpu_model_name',
-                '#variation_ram_memory_installed_size_name',
-                '#variation_hard_disk_size_name',
-                '#variation_graphics_coprocessor_name',
-                '#variation_brand_name',
-                '#variation_model_name',
-                '#variation_item_model_number_name',
-                '#variation_color_name ul',
-                '#variation_size_name ul',
-                '#variation_storage_name ul',
-                '.a-button-group',
-                '.a-button-toggle-group',
-                '[data-cy="color-picker"]',
-                '[data-testid="variant-color"]',
-                '[data-testid="variant-size"]',
-                '[data-testid="variant-storage"]',
-                '.variation-container',
-                '.variation-wrapper',
-                '.a-button[data-action="a-dropdown-button"]',
-                '.a-button-toggle[data-action="a-dropdown-button"]'
+                # Primary color variant selectors (real clickable buttons)
+                '#variation_color_name .a-button',
+                '#variation_color_name li .a-button',
+                '#variation_color_name [role="radio"]',
+                
+                # Size variants (real clickable buttons)
+                '#variation_size_name .a-button',
+                '#variation_size_name li .a-button', 
+                '#variation_size_name [role="radio"]',
+                
+                # Storage variants (real clickable buttons)
+                '#variation_storage_name .a-button',
+                '#variation_storage_name li .a-button',
+                '#variation_storage_name [role="radio"]',
+                
+                # Style variants (real clickable buttons)
+                '#variation_style_name .a-button',
+                '#variation_style_name li .a-button',
+                '#variation_style_name [role="radio"]',
+                
+                # Other specific variant types (real clickable buttons)
+                '#variation_pattern_name .a-button',
+                '#variation_material_name .a-button',
+                '#variation_edition_name .a-button',
+                '#variation_format_name .a-button',
+                
+                # Generic fallbacks for button groups (avoid text summaries)
+                '.a-button-group .a-button[aria-labelledby]',
+                '.a-button-toggle-group .a-button[aria-labelledby]',
+                '[data-cy="color-picker"] .a-button',
+                '[data-testid="variant-color"] .a-button',
+                '[data-testid="variant-size"] .a-button',
+                
+                # Radio group buttons (avoid dropdowns that show summaries)
+                '[role="radiogroup"] .a-button[aria-label]',
+                '.variation-container .a-button[aria-label]'
             ]
             
             for selector in selectors:
@@ -477,7 +480,7 @@ class AmazonVariantExtractor:
         except Exception:
             return 'variant'
 
-    def _extract_interactively(self) -> List[Dict]:
+    def _extract_interactively(self, main_price: float = None) -> List[Dict]:
         """Extract variant information by interacting with the page - ENHANCED FOR PERFECT DATA"""
         variants = []
         found_variant_groups = []
@@ -485,48 +488,44 @@ class AmazonVariantExtractor:
         try:
             logger.info("🎯 Starting ENHANCED interactive variant extraction...")
             
-            # Enhanced selectors for variant containers
+            # FIXED: Target only real clickable variant buttons, avoid summary text
             variant_container_selectors = [
-                # Style variants (color/design)
-                "[data-feature-name='variation'] .a-button-group .a-button",
-                "[data-feature-name='variation'] [role='radiogroup'] .a-button",
-                "#variation_style_name .a-button",
-                ".a-button-group[role='radiogroup'] .a-button",
-                "[id*='style'] .a-button",
+                # Color variants (highest priority - real color buttons)
+                "#variation_color_name li .a-button[aria-label]",
+                "#variation_color_name .a-button[title]",
+                "#variation_color_name [role='radio']",
                 
-                # Size variants
-                "#variation_size_name .a-button",
-                "[data-feature-name='size'] .a-button",
-                ".size-button-text .a-button",
-                "[id*='size'] .a-button",
+                # Size variants (real size selection buttons)
+                "#variation_size_name li .a-button[aria-label]",
+                "#variation_size_name .a-button[title]",
+                "#variation_size_name [role='radio']",
                 
-                # Configuration/Model variants  
-                "[data-feature-name='configuration'] .a-button",
-                "#variation_configuration .a-button",
-                "[id*='configuration'] .a-button",
-                "[id*='model'] .a-button",
+                # Storage variants (real storage option buttons)
+                "#variation_storage_name li .a-button[aria-label]",
+                "#variation_storage_name .a-button[title]",
+                "#variation_storage_name [role='radio']",
                 
-                # Storage/Memory variants
-                "#variation_storage .a-button", 
-                "[data-feature-name='storage'] .a-button",
-                "[id*='storage'] .a-button",
-                "[id*='memory'] .a-button",
+                # Style variants (real style selection buttons)
+                "#variation_style_name li .a-button[aria-label]",
+                "#variation_style_name .a-button[title]",
+                "#variation_style_name [role='radio']",
                 
-                # Network/Carrier variants
-                "[data-feature-name='network'] .a-button",
-                "#variation_network .a-button",
-                "[id*='network'] .a-button",
-                "[id*='carrier'] .a-button",
+                # Generic radiogroup buttons (avoid plain text/dropdown summaries)
+                "[role='radiogroup'] .a-button[aria-labelledby]",
+                ".a-button-group[role='radiogroup'] .a-button[aria-label]",
                 
-                # Generic fallbacks
-                ".a-button-toggle .a-button",
-                "[data-action='a-dropdown-button'] .a-button",
-                ".a-declarative .a-button[aria-label]"
+                # Specific data attributes for variants
+                "[data-feature-name='variation'] .a-button[aria-label]",
+                ".variation-container .a-button[data-action='a-dropdown-button'][aria-label]",
+                
+                # Modern variant selectors with proper attributes
+                "[data-cy='color-picker'] .a-button[aria-label]",
+                "[data-testid*='variant'] .a-button[aria-label]"
             ]
             
             for selector in variant_container_selectors:
                 try:
-                    logger.debug(f"🔍 Checking selector: {selector}")
+                    print(f"🔍 Checking selector: {selector}")
                     elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
                     
                     if elements:
@@ -569,12 +568,24 @@ class AmazonVariantExtractor:
                                     logger.warning(f"❌ Could not click element: {element.text}")
                                     continue
                                 
-                                # Enhanced wait for page updates
-                                time.sleep(3)  # Increased wait time
+                                # FIXED: Enhanced wait for variant-specific updates
+                                print(f"⏳ Waiting for variant data to load after clicking {element.text[:20]}...")
+                                time.sleep(4)  # Wait for price/image/stock updates
+                                
+                                # Wait for specific elements to update
+                                try:
+                                    # Wait for price to potentially change
+                                    WebDriverWait(self.driver, 5).until(
+                                        lambda driver: driver.find_element(By.CSS_SELECTOR, ".a-price, #priceblock_ourprice")
+                                    )
+                                    time.sleep(1)  # Additional stability wait
+                                except TimeoutException:
+                                    print("⚠️ Price elements not found, continuing anyway...")
+                                    pass
                                 
                                 # Extract comprehensive variant data
                                 try:
-                                    variant_data = self._extract_variant_info_after_click(element)
+                                    variant_data = self._extract_variant_info_after_click(element, main_price)
                                     
                                     if variant_data:
                                         variant_data['type'] = variant_type  # Override with detected type
@@ -662,7 +673,7 @@ class AmazonVariantExtractor:
             
         return variants
     
-    def _extract_variant_info_after_click(self, element) -> Optional[Dict]:
+    def _extract_variant_info_after_click(self, element, main_price: float = None) -> Optional[Dict]:
         """Extract variant information after clicking an element - ENHANCED FOR PERFECT DATA"""
         try:
             # 🚀 ENHANCED WAIT STRATEGY - Wait longer for content to fully load
@@ -686,11 +697,32 @@ class AmazonVariantExtractor:
             data_value = element.get_attribute('data-value') or ''
             title = element.get_attribute('title') or ''
             
-            # Get the best variant name
+            # Get the best variant name with enhanced validation
             variant_name = variant_name or aria_label or data_value or title
             
+            # FIXED: Enhanced validation to reject summary text patterns
             if not variant_name or len(variant_name) <= 1:
                 print(f"❌ No valid variant name found")
+                return None
+                
+            # Reject patterns that indicate summary text, not real variants
+            reject_patterns = [
+                'price hidden', 'options from', 'starting from', 'starting at',
+                'see price', 'view price', 'check availability', 'select to see',
+                'visit the', 'help page', 'click here', 'more info',
+                'price varies', 'varies by', 'multiple options'
+            ]
+            
+            variant_name_lower = variant_name.lower().strip()
+            if any(pattern in variant_name_lower for pattern in reject_patterns):
+                print(f"❌ Rejected summary text pattern: {variant_name}")
+                return None
+            
+            # Reject if it looks like a price range or generic text
+            if re.search(r'\d+\s*options?\s+from', variant_name_lower) or \
+               re.search(r'^\$\d+.*\$\d+', variant_name) or \
+               'price' in variant_name_lower:
+                print(f"❌ Rejected price/option summary: {variant_name}")
                 return None
             
             print(f"🔍 Extracting data for variant: {variant_name}")
@@ -994,20 +1026,30 @@ class AmazonVariantExtractor:
         return None
     
     def _fetch_variant_specific_price(self) -> Optional[float]:
-        """Fetch actual price for the selected variant"""
+        """Fetch actual price for the selected variant - FIXED TO TARGET VARIANT PRICES"""
         try:
-            # Enhanced price selectors with priority order
+            # FIXED: Priority selectors for variant-specific price updates (not main price)
             price_selectors = [
-                ".a-price .a-offscreen",  # Most common
-                ".a-price-whole",
-                ".a-price.a-text-price.a-size-medium.apexPriceToPay .a-offscreen",
-                "#priceblock_dealprice",
-                "#priceblock_ourprice", 
-                ".a-price-range .a-offscreen",
-                "[data-a-strike='true'] + .a-offscreen",
-                ".a-price.a-text-price .a-offscreen",
-                ".a-button-selected .a-price .a-offscreen",
-                ".a-button-selected .a-price-whole"
+                # Variant-specific price displays (highest priority)
+                ".a-price.a-text-price.a-size-medium.apexPriceToPay .a-offscreen",  # Updated price after variant selection
+                ".a-price[data-a-price-type='minPrice'] .a-offscreen",  # Variant min price
+                ".a-price[data-a-price-type='maxPrice'] .a-offscreen",  # Variant max price
+                ".a-price.reinventPricePriceToPayMargin .a-offscreen",  # Amazon's dynamic price display
+                
+                # Price containers that update on variant change
+                "[data-feature-name='apex'] .a-price .a-offscreen",  # Apex price container
+                "#apex_desktop .a-price .a-offscreen",  # Desktop apex price
+                ".a-price-sm .a-offscreen",  # Small price format
+                
+                # Selected variant price indicators
+                ".a-button-selected + .a-price .a-offscreen",  # Price next to selected button
+                ".a-selected .a-price .a-offscreen",  # Price in selected container
+                
+                # Common price selectors (fallback)
+                ".a-price .a-offscreen",  # Generic price
+                ".a-price-whole",  # Price whole number
+                "#priceblock_dealprice",  # Deal price
+                "#priceblock_ourprice"   # Regular price
             ]
             
             for selector in price_selectors:
