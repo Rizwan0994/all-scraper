@@ -231,10 +231,10 @@ class DatabaseManager:
                 product.get('meta_tags_description', ''),  # meta_description
                 0,  # order_count
                 product.get('review_count', 0),  # product_reviews
-                '12',  # disocunt_type (default to 12 for percentage)
+                '14',  # disocunt_type (ID 14 = Percentage)
                 '26',  # child_category (default)
-                product.get('current_stock', 0),  # stock
-                '7',  # status (active)
+                '11',  # stock (ID 11 = Stock In)
+                '8',  # status (ID 8 = Published)
                 '16',  # brand (default)
                 '1',  # created_by
                 '1',  # updated_by
@@ -330,9 +330,9 @@ class DatabaseManager:
                     datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                     datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                     product.get('discount', 0),
-                    '12',  # discount_type
+                    '14',  # discount_type (ID 14 = Percentage)
                     'default_combination',
-                    '1'  # stock_status
+                    '11'  # stock_status (ID 11 = Stock In)
                 )
                 cursor.execute(insert_query, values)
                 variation_id = cursor.lastrowid
@@ -390,9 +390,9 @@ class DatabaseManager:
                         datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                         datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                         product.get('discount', 0),
-                        '12',  # discount_type
+                        '14',  # discount_type (ID 14 = Percentage)
                         combination or 'default_combination',
-                        '1'  # stock_status
+                        '11'  # stock_status (ID 11 = Stock In)
                     )
                     cursor.execute(insert_query, values)
                     variation_id = cursor.lastrowid
@@ -904,10 +904,10 @@ class DatabaseManager:
                 product.get('meta_tags_description', ''),  # meta_description
                 0,  # order_count
                 product.get('review_count', 0),  # product_reviews
-                '12',  # disocunt_type (default to 12 for percentage)
+                '14',  # disocunt_type (ID 14 = Percentage from types table)
                 '26',  # child_category (default)
-                product.get('current_stock', 0),  # stock
-                '7',  # status (active)
+                '11',  # stock (ID 11 = Stock In from stock_status types)
+                '8',  # status (ID 8 = Published from status types)
                 '16',  # brand (default)
                 '1',  # updated_by
                 datetime.now().strftime('%Y-%m-%d %H:%M:%S'),  # updated_at
