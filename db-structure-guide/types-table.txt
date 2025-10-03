@@ -1,0 +1,40 @@
+[
+{"type":"header","version":"5.2.2","comment":"Export to JSON plugin for PHPMyAdmin"},
+{"type":"database","name":"scrapping"},
+{"type":"table","name":"types","database":"scrapping","data":
+[
+{"id":"1","name":"status","status":"active","order":"0","parent_id":null,"created_by":null,"updated_by":null,"deleted_at":null,"created_at":"2025-09-26 03:27:59","updated_at":"2025-09-26 03:27:59"},
+{"id":"2","name":"stock_status","status":"active","order":"0","parent_id":null,"created_by":null,"updated_by":null,"deleted_at":null,"created_at":"2025-09-26 03:27:59","updated_at":"2025-09-26 03:27:59"},
+{"id":"3","name":"discount","status":"active","order":"0","parent_id":null,"created_by":null,"updated_by":null,"deleted_at":null,"created_at":"2025-09-26 03:27:59","updated_at":"2025-09-26 03:27:59"},
+{"id":"4","name":"brand","status":"active","order":"0","parent_id":null,"created_by":null,"updated_by":null,"deleted_at":null,"created_at":"2025-09-26 03:27:59","updated_at":"2025-09-26 03:27:59"},
+{"id":"5","name":"blog_categories","status":"active","order":"0","parent_id":null,"created_by":null,"updated_by":null,"deleted_at":null,"created_at":"2025-09-26 03:27:59","updated_at":"2025-09-26 03:27:59"},
+{"id":"6","name":"unit","status":"active","order":"0","parent_id":null,"created_by":null,"updated_by":null,"deleted_at":null,"created_at":"2025-09-26 03:27:59","updated_at":"2025-09-26 03:27:59"},
+{"id":"7","name":"banner_types","status":"active","order":"0","parent_id":null,"created_by":null,"updated_by":null,"deleted_at":null,"created_at":"2025-09-26 03:27:59","updated_at":"2025-09-26 03:27:59"},
+{"id":"8","name":"Published","status":"active","order":"1","parent_id":"1","created_by":null,"updated_by":null,"deleted_at":null,"created_at":"2025-09-26 03:27:59","updated_at":"2025-09-26 03:27:59"},
+{"id":"9","name":"Drafts","status":"active","order":"2","parent_id":"1","created_by":null,"updated_by":null,"deleted_at":null,"created_at":"2025-09-26 03:27:59","updated_at":"2025-09-26 03:27:59"},
+{"id":"10","name":"Rejected","status":"active","order":"3","parent_id":"1","created_by":null,"updated_by":null,"deleted_at":null,"created_at":"2025-09-26 03:27:59","updated_at":"2025-09-26 03:27:59"},
+{"id":"11","name":"Stock In","status":"active","order":"1","parent_id":"2","created_by":null,"updated_by":null,"deleted_at":null,"created_at":"2025-09-26 03:27:59","updated_at":"2025-09-26 03:27:59"},
+{"id":"12","name":"Out of Stock","status":"active","order":"2","parent_id":"2","created_by":null,"updated_by":null,"deleted_at":null,"created_at":"2025-09-26 03:27:59","updated_at":"2025-09-26 03:27:59"},
+{"id":"13","name":"Flat","status":"active","order":"1","parent_id":"3","created_by":null,"updated_by":null,"deleted_at":null,"created_at":"2025-09-26 03:27:59","updated_at":"2025-09-26 03:27:59"},
+{"id":"14","name":"Percentage","status":"active","order":"2","parent_id":"3","created_by":null,"updated_by":null,"deleted_at":null,"created_at":"2025-09-26 03:27:59","updated_at":"2025-09-26 03:27:59"},
+{"id":"15","name":"Audi","status":"active","order":"1","parent_id":"4","created_by":null,"updated_by":null,"deleted_at":null,"created_at":"2025-09-26 03:27:59","updated_at":"2025-09-26 03:27:59"},
+{"id":"16","name":"Adidas","status":"active","order":"2","parent_id":"4","created_by":null,"updated_by":null,"deleted_at":null,"created_at":"2025-09-26 03:27:59","updated_at":"2025-09-26 03:27:59"},
+{"id":"17","name":"Nike","status":"active","order":"3","parent_id":"4","created_by":null,"updated_by":null,"deleted_at":null,"created_at":"2025-09-26 03:27:59","updated_at":"2025-09-26 03:27:59"},
+{"id":"18","name":"H & M","status":"active","order":"4","parent_id":"4","created_by":null,"updated_by":null,"deleted_at":null,"created_at":"2025-09-26 03:27:59","updated_at":"2025-09-26 03:27:59"},
+{"id":"19","name":"Versace","status":"active","order":"5","parent_id":"4","created_by":null,"updated_by":null,"deleted_at":null,"created_at":"2025-09-26 03:27:59","updated_at":"2025-09-26 03:27:59"},
+{"id":"20","name":"Gucci","status":"active","order":"6","parent_id":"4","created_by":null,"updated_by":null,"deleted_at":null,"created_at":"2025-09-26 03:27:59","updated_at":"2025-09-26 03:27:59"},
+{"id":"21","name":"HP","status":"active","order":"7","parent_id":"4","created_by":null,"updated_by":null,"deleted_at":null,"created_at":"2025-09-26 03:27:59","updated_at":"2025-09-26 03:27:59"},
+{"id":"22","name":"General","status":"active","order":"1","parent_id":"5","created_by":null,"updated_by":null,"deleted_at":null,"created_at":"2025-09-26 03:27:59","updated_at":"2025-09-26 03:27:59"},
+{"id":"23","name":"Finance","status":"active","order":"2","parent_id":"5","created_by":null,"updated_by":null,"deleted_at":null,"created_at":"2025-09-26 03:27:59","updated_at":"2025-09-26 03:27:59"},
+{"id":"24","name":"Health","status":"active","order":"3","parent_id":"5","created_by":null,"updated_by":null,"deleted_at":null,"created_at":"2025-09-26 03:27:59","updated_at":"2025-09-26 03:27:59"},
+{"id":"25","name":"Life Style","status":"active","order":"4","parent_id":"5","created_by":null,"updated_by":null,"deleted_at":null,"created_at":"2025-09-26 03:27:59","updated_at":"2025-09-26 03:27:59"},
+{"id":"26","name":"KG","status":"active","order":"1","parent_id":"6","created_by":null,"updated_by":null,"deleted_at":null,"created_at":"2025-09-26 03:27:59","updated_at":"2025-09-26 03:27:59"},
+{"id":"27","name":"Pcs","status":"active","order":"2","parent_id":"6","created_by":null,"updated_by":null,"deleted_at":null,"created_at":"2025-09-26 03:27:59","updated_at":"2025-09-26 03:27:59"},
+{"id":"28","name":"Liter","status":"active","order":"3","parent_id":"6","created_by":null,"updated_by":null,"deleted_at":null,"created_at":"2025-09-26 03:27:59","updated_at":"2025-09-26 03:27:59"},
+{"id":"29","name":"Pound","status":"active","order":"4","parent_id":"6","created_by":null,"updated_by":null,"deleted_at":null,"created_at":"2025-09-26 03:27:59","updated_at":"2025-09-26 03:27:59"},
+{"id":"30","name":"Mobile","status":"active","order":"1","parent_id":"7","created_by":null,"updated_by":null,"deleted_at":null,"created_at":"2025-09-26 03:27:59","updated_at":"2025-09-26 03:27:59"},
+{"id":"31","name":"Desktop","status":"active","order":"2","parent_id":"7","created_by":null,"updated_by":null,"deleted_at":null,"created_at":"2025-09-26 03:27:59","updated_at":"2025-09-26 03:27:59"},
+{"id":"32","name":"Website Popup","status":"active","order":"3","parent_id":"7","created_by":null,"updated_by":null,"deleted_at":null,"created_at":"2025-09-26 03:27:59","updated_at":"2025-09-26 03:27:59"}
+]
+}
+]
