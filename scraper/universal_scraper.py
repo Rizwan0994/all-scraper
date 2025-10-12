@@ -49,13 +49,22 @@ import cloudscraper
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from chunk_manager import ChunkManager
 
-# Import advanced variant extractor
+# Import AI-powered variant extractor
 try:
-    from amazon_variant_extractor import AmazonVariantExtractor
-    ADVANCED_EXTRACTOR_AVAILABLE = True
+    from enhanced_ai_variant_extractor import EnhancedAIVariantExtractor
+    AI_EXTRACTOR_AVAILABLE = True
+    print("✅ AI-powered variant extractor loaded")
 except ImportError:
-    ADVANCED_EXTRACTOR_AVAILABLE = False
-    print("Advanced variant extractor not available")
+    AI_EXTRACTOR_AVAILABLE = False
+    print("AI variant extractor not available - falling back to basic extraction")
+
+# Import enhanced variant extractor (fallback)
+try:
+    from enhanced_variant_extractor import EnhancedVariantPriceExtractor
+    ENHANCED_EXTRACTOR_AVAILABLE = True
+except ImportError:
+    ENHANCED_EXTRACTOR_AVAILABLE = False
+    print("Enhanced variant extractor not available")
 
 # Undetected Chrome driver
 try:
@@ -1004,13 +1013,26 @@ class UniversalScraper:
             # 🇺🇸 US-based user agent for global Amazon access
             options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36')
             
-            # 🌍 Geographic settings to appear as US user
+            # 🌍 Geographic settings to appear as US user - FORCE USD CURRENCY
             options.add_argument('--disable-geolocation')
+            options.add_argument('--disable-geolocation-on-insecure-origins')
+            
+            # Set timezone to US Eastern to appear as US user
+            options.add_argument('--timezone=America/New_York')
+            
             options.add_experimental_option('prefs', {
                 'profile.default_content_setting_values.geolocation': 2,  # Block location
                 'profile.managed_default_content_settings.geolocation': 2,
                 'intl.accept_languages': 'en-US,en',
-                'intl.charset_default': 'UTF-8'
+                'intl.charset_default': 'UTF-8',
+                
+                # Force download settings to US
+                'download.default_directory': '/tmp',
+                'download.prompt_for_download': False,
+                
+                # Disable notifications and popups
+                'profile.default_content_setting_values.notifications': 2,
+                'profile.default_content_setting_values.automatic_downloads': 1,
             })
             
             # Performance options for your high-end system (14th gen + RTX 50)
@@ -1064,7 +1086,60 @@ class UniversalScraper:
                     'timezoneId': 'America/New_York'
                 })
                 
-                logger.info("🌍 Geographic settings applied: US location, EN-US language")
+                # 💰 FORCE USD CURRENCY: Navigate to Amazon and set currency cookies
+                logger.info("💰 Setting USD currency preference...")
+                self.driver.get('https://www.amazon.com')
+                time.sleep(2)
+                
+                # Set cookies to force USD currency
+                self.driver.add_cookie({
+                    'name': 'i18n-prefs',
+                    'value': 'USD',
+                    'domain': '.amazon.com',
+                    'path': '/',
+                })
+                
+                self.driver.add_cookie({
+                    'name': 'lc-main',
+                    'value': 'en_US',
+                    'domain': '.amazon.com',
+                    'path': '/',
+                })
+                
+                # Navigate to Amazon currency selector and force USD
+                try:
+                    self.driver.get('https://www.amazon.com/customer-preferences/edit?ie=UTF8&preferencesReturnUrl=%2F&ref_=footer_cop')
+                    time.sleep(2)
+                    
+                    # Try to select USD from dropdown
+                    from selenium.webdriver.common.by import By
+                    from selenium.webdriver.support.ui import Select
+                    from selenium.webdriver.support.ui import WebDriverWait
+                    from selenium.webdriver.support import expected_conditions as EC
+                    
+                    try:
+                        currency_select = WebDriverWait(self.driver, 5).until(
+                            EC.presence_of_element_located((By.ID, "icp-sc-dropdown"))
+                        )
+                        select = Select(currency_select)
+                        select.select_by_value('USD')
+                        logger.info("✅ Selected USD from currency dropdown")
+                    except:
+                        logger.debug("Currency dropdown not found, cookies should work")
+                    
+                    # Click save if button exists
+                    try:
+                        save_button = self.driver.find_element(By.CSS_SELECTOR, "input[type='submit']")
+                        save_button.click()
+                        time.sleep(1)
+                        logger.info("✅ Saved USD currency preference")
+                    except:
+                        logger.debug("Save button not found, proceeding")
+                        
+                except Exception as e:
+                    logger.debug(f"Currency preference page navigation failed: {e}")
+                
+                logger.info("🌍 Geographic settings applied: US location, EN-US language, USD currency")
                 
             except Exception as e:
                 logger.debug(f"Stealth/location scripts failed: {e}")
@@ -1788,19 +1863,34 @@ class UniversalScraper:
                     # 🚀 USE ENHANCED VARIANT EXTRACTION - REAL PRICES SYSTEM!
                     logger.info(f"🚀 Using ENHANCED variant extraction for: {title[:50]}...")
                     
-                    # Try enhanced extraction with real prices first
+                    # Try AI-powered enhanced extraction with real prices first
                     variants = []
                     try:
-                        from enhanced_variant_extractor import EnhancedVariantPriceExtractor
-                        enhanced_extractor = EnhancedVariantPriceExtractor(self.stealth_driver)
-                        # 🌍 ENSURE GLOBAL AMAZON URL for variant extraction
-                        global_product_url = self._ensure_global_amazon_url(product_url)
-                        variants = enhanced_extractor.extract_variants_with_real_prices(global_product_url, title, price)
+                        if AI_EXTRACTOR_AVAILABLE:
+                            logger.info("🤖 Using AI-powered variant extraction")
+                            enhanced_extractor = EnhancedAIVariantExtractor(self.stealth_driver)
+                            # 🌍 ENSURE GLOBAL AMAZON URL for variant extraction
+                            global_product_url = self._ensure_global_amazon_url(product_url)
+                            variants = enhanced_extractor.extract_variants_with_ai(global_product_url, title, price)
+                        elif ENHANCED_EXTRACTOR_AVAILABLE:
+                            logger.info("📊 Using enhanced variant extraction (fallback)")
+                            from enhanced_variant_extractor import EnhancedVariantPriceExtractor
+                            enhanced_extractor = EnhancedVariantPriceExtractor(self.stealth_driver)
+                            # 🌍 ENSURE GLOBAL AMAZON URL for variant extraction
+                            global_product_url = self._ensure_global_amazon_url(product_url)
+                            variants = enhanced_extractor.extract_variants_with_real_prices(global_product_url, title, price)
                         
                         if variants:
                             logger.info(f"🚀 Enhanced extraction found {len(variants)} variants with REAL prices")
                             variant_names = [v.get('name', 'Unknown') for v in variants[:10]]
                             logger.info(f"✅ ENHANCED VARIANTS: {', '.join(variant_names)}")
+                            
+                            # Log AI confidence scores if available
+                            if AI_EXTRACTOR_AVAILABLE and variants:
+                                ai_confidences = [v.get('ai_confidence', 0) for v in variants if 'ai_confidence' in v]
+                                if ai_confidences:
+                                    avg_confidence = sum(ai_confidences) / len(ai_confidences)
+                                    logger.info(f"🤖 AI Average Confidence: {avg_confidence:.2f}")
                         else:
                             logger.info("🔍 Enhanced extraction found no variants - trying fallback...")
                             raise Exception("No variants found, using fallback")
@@ -6517,11 +6607,17 @@ class UniversalScraper:
             # Combine all images
             all_images = ([main_image] if main_image else []) + additional_images[:10]
             
-            # Create product
+            # Create product with correct type based on variants
+            product_type = "Variant" if variants else "Single Product"
+            if variants:
+                logger.info(f"✅ Product classified as 'Variant' with {len(variants)} variants")
+            else:
+                logger.info("✅ Product classified as 'Single Product' (no variants)")
+            
             product = Product(
                 product_name=title,
                 original_title=title,
-                product_type="Variant" if variants else "Single Product",
+                product_type=product_type,
                 unit_price=price,
                 purchase_price=0.0,
                 sku=sku,

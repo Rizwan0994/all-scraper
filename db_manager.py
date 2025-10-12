@@ -319,12 +319,31 @@ class DatabaseManager:
                     discount_type, combination, stock_status
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """
+                
+                # CRITICAL FIX: Force integer conversion for stock
+                default_stock = product.get('current_stock', 0)
+                try:
+                    default_stock = int(default_stock) if default_stock else 0
+                except (ValueError, TypeError):
+                    logger.warning(f"Invalid stock value '{default_stock}' for default variant, defaulting to 0")
+                    default_stock = 0
+                
+                # CRITICAL FIX: Force float conversion for prices
+                default_purchase_price = product.get('purchase_price', 0)
+                default_unit_price = product.get('unit_price', 0)
+                try:
+                    default_purchase_price = float(default_purchase_price) if default_purchase_price else 0.0
+                    default_unit_price = float(default_unit_price) if default_unit_price else 0.0
+                except (ValueError, TypeError):
+                    default_purchase_price = 0.0
+                    default_unit_price = 0.0
+                
                 values = (
                     product_id,
                     default_sku,
-                    product.get('purchase_price', 0),
-                    product.get('unit_price', 0),
-                    product.get('current_stock', 0),
+                    default_purchase_price,
+                    default_unit_price,
+                    default_stock,
                     '1',  # created_by
                     '1',  # updated_by
                     datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
@@ -379,12 +398,34 @@ class DatabaseManager:
                         discount_type, combination, stock_status
                     ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """
+                    # CRITICAL FIX: Force integer conversion for stock values
+                    variant_stock = variant.get('stock', 0)
+                    try:
+                        variant_stock = int(variant_stock) if variant_stock else 0
+                    except (ValueError, TypeError):
+                        logger.warning(f"Invalid stock value '{variant_stock}' for variant, defaulting to 0")
+                        variant_stock = 0
+                    
+                    # CRITICAL FIX: Force float conversion for prices
+                    variant_price = variant.get('price', 0)
+                    try:
+                        variant_price = float(variant_price) if variant_price else 0.0
+                    except (ValueError, TypeError):
+                        logger.warning(f"Invalid price value '{variant_price}' for variant, defaulting to 0.0")
+                        variant_price = 0.0
+                    
+                    purchase_price = product.get('purchase_price', 0)
+                    try:
+                        purchase_price = float(purchase_price) if purchase_price else 0.0
+                    except (ValueError, TypeError):
+                        purchase_price = 0.0
+                    
                     values = (
                         product_id,
                         variant.get('sku', ''),
-                        product.get('purchase_price', 0),  # Use main product purchase price
-                        variant.get('price', 0),
-                        variant.get('stock', 0),
+                        purchase_price,  # Use main product purchase price
+                        variant_price,
+                        variant_stock,
                         '1',  # created_by
                         '1',  # updated_by
                         datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
@@ -458,19 +499,28 @@ class DatabaseManager:
 
     def _build_variant_combination(self, cursor, variant, product, product_id, clean_name=None):
         """Create ID-based combination string for a variant and ensure product_attributes links.
-
-        Supports variant option structures like:
-        - variant['options'] as dict { name: value }
-        - variant['options'] as list of { name, value }
-        - variant['attributes'] similar to options
-        - Parsed from clean_name for better attribute extraction
+        
+        ENHANCED FOR E-COMMERCE:
+        - Uses variant['type'] field (color, size, etc.) from scraper
+        - Uses variant['name'] field as the attribute value
+        - Maps to existing database attributes (Color, Size, Material)
+        - Supports multiple attribute combinations
         """
         try:
             option_pairs = []  # list of (parent_id, child_id)
-
-            # Extract options from standard fields
-            possible_keys = ['options', 'attributes']
             found_map = {}
+
+            # PRIORITY 1: Use variant type and name from scraper (most common case)
+            variant_type = variant.get('type')
+            variant_name = variant.get('name') or clean_name
+            
+            if variant_type and variant_name:
+                # This is the standard format from our scraper
+                found_map[variant_type] = variant_name
+                logger.debug(f"Using variant type '{variant_type}' with value '{variant_name}'")
+            
+            # PRIORITY 2: Extract options from standard fields (backward compatibility)
+            possible_keys = ['options', 'attributes']
             for key in possible_keys:
                 raw = variant.get(key)
                 if isinstance(raw, dict):
@@ -485,20 +535,20 @@ class DatabaseManager:
                         if name is not None and value is not None:
                             found_map[name] = value
 
-            # If no proper options found, try to parse from clean_name
+            # PRIORITY 3: If no proper options found, try to parse from clean_name
             if not found_map and clean_name:
                 parsed_attributes = self._parse_variant_attributes_from_name(clean_name)
                 found_map.update(parsed_attributes)
                 logger.info(f"Parsed attributes from name '{clean_name}': {parsed_attributes}")
 
-            # If still no options, try product-level attributes for single attribute variant
+            # PRIORITY 4: If still no options, try product-level attributes
             if not found_map and isinstance(product.get('attributes'), dict):
                 product_attrs = product.get('attributes')
                 for k, v in product_attrs.items():
                     if k.lower() != 'variant':  # Skip generic variant field
                         found_map[k] = v
 
-            # Create attribute pairs
+            # Create attribute pairs with proper mapping
             for name, value in found_map.items():
                 if value is None or str(value).strip() == '':
                     continue
@@ -507,22 +557,22 @@ class DatabaseManager:
                 clean_attr_name = str(name).strip()
                 clean_attr_value = str(value).strip()
                 
+                # Get or create parent attribute (maps to existing DB attributes)
                 parent_id = self._get_or_create_attribute_parent(cursor, clean_attr_name)
                 child_id = self._get_or_create_attribute_value(cursor, parent_id, clean_attr_value)
                 option_pairs.append((parent_id, child_id))
 
-                # Ensure product_attributes rows exist
+                # Ensure product_attributes rows exist (links product to parent attribute)
                 self._ensure_product_attribute_link(cursor, product_id, parent_id, 'parent')
-                self._ensure_product_attribute_link(cursor, product_id, child_id, 'child')
 
             if not option_pairs:
                 logger.warning(f"No valid attributes found for variant: {variant.get('name', 'Unknown')}")
                 return 'single_combination'
 
-            # Sort by parent_id and format
+            # Sort by parent_id and format: "parentId:childId|parentId:childId"
             option_pairs.sort(key=lambda p: p[0])
             combo = '|'.join([f"{pid}:{cid}" for pid, cid in option_pairs])
-            logger.info(f"Generated combination: {combo} from {len(option_pairs)} attributes")
+            logger.info(f"Generated combination: {combo} from {len(option_pairs)} attributes (type: {variant_type})")
             return combo
             
         except Exception as e:
@@ -635,11 +685,55 @@ class DatabaseManager:
         except Exception:
             return ''
 
+    def _map_variant_type_to_attribute(self, variant_type):
+        """Map scraped variant type to standard e-commerce attribute names.
+        
+        This ensures we use existing database attributes (Color, Size, Material)
+        instead of creating new ones.
+        """
+        type_mapping = {
+            # Color variants
+            'color': 'Color',
+            'colour': 'Color',
+            'colors': 'Color',
+            'colours': 'Color',
+            
+            # Size variants
+            'size': 'Size',
+            'sizes': 'Size',
+            
+            # Material variants
+            'material': 'Material',
+            'materials': 'Material',
+            'fabric': 'Material',
+            
+            # Storage/Memory variants (map to Size for consistency)
+            'storage': 'Storage',
+            'memory': 'Storage',
+            'capacity': 'Storage',
+            'ram': 'RAM',
+            
+            # Generic variant type - will be handled specially
+            'variant': 'Variant',
+        }
+        
+        normalized_type = variant_type.lower().strip()
+        mapped = type_mapping.get(normalized_type, variant_type.title())
+        
+        logger.debug(f"Mapped variant type '{variant_type}' -> '{mapped}'")
+        return mapped
+
     def _get_or_create_attribute_parent(self, cursor, name):
-        """Return id for parent attribute (parent_id IS NULL), creating if needed."""
-        normalized = self._normalize_text(name)
+        """Return id for parent attribute (parent_id IS NULL), creating if needed.
+        
+        IMPORTANT: Maps common scraped variant types to existing database attributes.
+        """
+        # CRITICAL: Map variant type to standard attribute name
+        mapped_name = self._map_variant_type_to_attribute(name)
+        
+        normalized = self._normalize_text(mapped_name)
         if normalized in self._attribute_parent_cache:
-            logger.debug(f"Using cached parent attribute '{name}' (ID: {self._attribute_parent_cache[normalized]})")
+            logger.debug(f"Using cached parent attribute '{mapped_name}' (ID: {self._attribute_parent_cache[normalized]})")
             return self._attribute_parent_cache[normalized]
 
         select_sql = "SELECT id FROM attributes WHERE LOWER(name) = %s AND parent_id IS NULL LIMIT 1"
@@ -648,20 +742,21 @@ class DatabaseManager:
         if row:
             parent_id = int(row[0])
             self._attribute_parent_cache[normalized] = parent_id
-            logger.debug(f"Found existing parent attribute '{name}' (ID: {parent_id})")
+            logger.debug(f"Found existing parent attribute '{mapped_name}' (ID: {parent_id})")
             return parent_id
 
+        # ONLY create if doesn't exist (should rarely happen with seeded data)
         now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         insert_sql = """
             INSERT INTO attributes (name, status, `order`, parent_id, created_at, updated_at)
             VALUES (%s, %s, %s, %s, %s, %s)
         """
-        cursor.execute(insert_sql, (name.strip(), 'active', 0, None, now, now))
+        cursor.execute(insert_sql, (mapped_name.strip(), 'active', 0, None, now, now))
         parent_id = cursor.lastrowid
         self._attribute_parent_cache[normalized] = parent_id
         # init children cache bucket
         self._attribute_children_cache.setdefault(parent_id, {})
-        logger.info(f"Created new parent attribute '{name}' (ID: {parent_id})")
+        logger.info(f"Created new parent attribute '{mapped_name}' (ID: {parent_id}) - this should rarely happen!")
         return parent_id
 
     def _get_or_create_attribute_value(self, cursor, parent_id, value_name):
