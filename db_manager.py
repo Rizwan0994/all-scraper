@@ -1100,6 +1100,49 @@ class DatabaseManager:
                 self.connection.rollback()
             return {'success': False, 'message': str(e)}
     
+    def insert_products_from_json(self, products, connection_params=None):
+        """Insert products directly from JSON data - for Insert All Products button"""
+        try:
+            logger.info(f"🚀 Starting direct JSON insertion of {len(products):,} products")
+            
+            # Connect to database
+            if connection_params:
+                if not self.connect(**connection_params):
+                    return {'success': False, 'message': 'Database connection failed'}
+            else:
+                if not self.connection or not self.connection.is_connected():
+                    if not self.connect():
+                        return {'success': False, 'message': 'Database connection failed'}
+            
+            cursor = self.connection.cursor()
+            
+            # Process all products
+            total_inserted, total_updated = self._process_product_chunk(cursor, products)
+            
+            # Commit transaction
+            self.connection.commit()
+            cursor.close()
+            
+            logger.info(f"✅ JSON insertion completed: {total_inserted} inserted, {total_updated} updated")
+            
+            return {
+                'success': True,
+                'message': f'Successfully processed {len(products):,} products from JSON: {total_inserted} inserted, {total_updated} updated',
+                'inserted': total_inserted,
+                'updated': total_updated,
+                'source': 'json_file'
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in JSON product insertion: {e}")
+            if self.connection:
+                self.connection.rollback()
+            return {'success': False, 'message': f'Database error: {str(e)}'}
+        
+        finally:
+            if self.connection and self.connection.is_connected():
+                self.connection.close()
+    
     def _process_product_chunk(self, cursor, products):
         """Process a chunk of products"""
         inserted_count = 0

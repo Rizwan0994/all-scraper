@@ -709,7 +709,7 @@ def insert_all_products():
             'port': data.get('port')
         }
         
-        # Load products from JSON file
+        # 🔧 FIX: Always use JSON file for "Insert All Products" button
         json_file = "scraped_data/products.json"
         if not os.path.exists(json_file):
             return jsonify({
@@ -726,8 +726,10 @@ def insert_all_products():
                 'message': 'No products found in JSON file.'
             }), 400
         
-        # Use chunked insertion method for better performance
-        result = db_manager.insert_products_chunked(test_mode=False, connection_params=connection_params)
+        logger.info(f"🚀 INSERT ALL: Processing {len(products):,} products from JSON file")
+        
+        # Use direct JSON insertion instead of chunked method
+        result = db_manager.insert_products_from_json(products, connection_params=connection_params)
         return jsonify(result)
         
     except Exception as e:

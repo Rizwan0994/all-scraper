@@ -575,8 +575,12 @@ function exportFilteredProducts() {
 // Enhanced loadProducts function with filtering
 async function loadProducts() {
     try {
-        const response = await fetch('/products');
-        const products = await response.json();
+        // 🔧 FIX: Use the paginated API and extract products array
+        const response = await fetch('/api/products/page/1?per_page=1000');  // Load first 1000 products
+        const data = await response.json();
+        
+        // 🔧 FIX: Extract products array from paginated response
+        const products = data.products || [];
         
         allProducts = products;
         filteredProducts = products;

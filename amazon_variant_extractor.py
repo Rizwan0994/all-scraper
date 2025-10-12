@@ -91,51 +91,61 @@ class AmazonVariantExtractor:
         
         try:
             # FIXED: Target actual clickable variant buttons, not summary text
-            selectors = [
-                # Primary color variant selectors (real clickable buttons)
-                '#variation_color_name .a-button',
-                '#variation_color_name li .a-button',
-                '#variation_color_name [role="radio"]',
+            # Priority 1: Exact variation containers with clickable buttons
+            priority_selectors = [
+                # Color variants - target only clickable buttons, not summary text
+                '#variation_color_name li[data-defaultasin] .a-button[aria-label]',
+                '#variation_color_name li .a-button:not([data-action="a-dropdown-button"])',
+                '#variation_color_name .a-button[title]:not(:contains("See available"))',
                 
-                # Size variants (real clickable buttons)
-                '#variation_size_name .a-button',
-                '#variation_size_name li .a-button', 
-                '#variation_size_name [role="radio"]',
+                # Size/Storage variants - target only clickable buttons
+                '#variation_size_name li[data-defaultasin] .a-button[aria-label]',
+                '#variation_size_name li .a-button:not([data-action="a-dropdown-button"])',
+                '#variation_size_name .a-button[title]:not(:contains("See available"))',
                 
-                # Storage variants (real clickable buttons)
-                '#variation_storage_name .a-button',
-                '#variation_storage_name li .a-button',
-                '#variation_storage_name [role="radio"]',
+                # Storage variants - specific to storage options
+                '#variation_storage_name li[data-defaultasin] .a-button[aria-label]',
+                '#variation_storage_name li .a-button:not([data-action="a-dropdown-button"])',
                 
-                # Style variants (real clickable buttons)
-                '#variation_style_name .a-button',
-                '#variation_style_name li .a-button',
-                '#variation_style_name [role="radio"]',
-                
-                # Other specific variant types (real clickable buttons)
-                '#variation_pattern_name .a-button',
-                '#variation_material_name .a-button',
-                '#variation_edition_name .a-button',
-                '#variation_format_name .a-button',
-                
-                # Generic fallbacks for button groups (avoid text summaries)
-                '.a-button-group .a-button[aria-labelledby]',
-                '.a-button-toggle-group .a-button[aria-labelledby]',
-                '[data-cy="color-picker"] .a-button',
-                '[data-testid="variant-color"] .a-button',
-                '[data-testid="variant-size"] .a-button',
-                
-                # Radio group buttons (avoid dropdowns that show summaries)
-                '[role="radiogroup"] .a-button[aria-label]',
-                '.variation-container .a-button[aria-label]'
+                # Style/Pattern variants
+                '#variation_style_name li[data-defaultasin] .a-button[aria-label]',
+                '#variation_pattern_name li[data-defaultasin] .a-button[aria-label]',
             ]
             
-            for selector in selectors:
+            # Priority 2: Generic fallback selectors (only if priority selectors fail)
+            fallback_selectors = [
+                # Generic button groups with proper attributes
+                '.a-button-group li[data-defaultasin] .a-button[aria-label]',
+                '.a-button-toggle-group li[data-defaultasin] .a-button[aria-label]',
+                
+                # Radio group buttons with proper attributes
+                '[role="radiogroup"] li[data-defaultasin] .a-button[aria-label]',
+                '[role="radiogroup"] .a-button[data-defaultasin][aria-label]',
+                
+                # Modern variant selectors
+                '[data-cy="color-picker"] .a-button[aria-label]:not(:contains("See available"))',
+                '[data-testid*="variant"] .a-button[aria-label]:not(:contains("See available"))',
+            ]
+            
+            all_selectors = priority_selectors + fallback_selectors
+            
+            # Process selectors in priority order
+            for selector in all_selectors:
                 try:
                     elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                    for element in elements:
-                        variants.extend(self._extract_variants_from_element(element))
+                    if elements:
+                        logger.info(f"✅ Found {len(elements)} variant elements with: {selector}")
+                        for element in elements:
+                            # Strict validation to avoid summary text
+                            if self._is_valid_variant_element(element):
+                                variants.extend(self._extract_variants_from_element(element))
+                        
+                        # If we found good variants with priority selectors, don't use fallbacks
+                        if variants and selector in priority_selectors:
+                            break
+                            
                 except Exception as e:
+                    logger.debug(f"Selector failed: {selector} - {e}")
                     continue
                     
         except Exception as e:
@@ -143,8 +153,60 @@ class AmazonVariantExtractor:
             
         return variants
     
+    def _is_valid_variant_element(self, element) -> bool:
+        """Validate that an element contains a real variant, not summary text"""
+        try:
+            # Get text content from element
+            text = element.text.strip()
+            aria_label = element.get_attribute('aria-label') or ''
+            title = element.get_attribute('title') or ''
+            
+            # Combine all text sources
+            all_text = f"{text} {aria_label} {title}".lower().strip()
+            
+            # Reject summary text patterns
+            invalid_patterns = [
+                'see available', 'see options', 'see all', 'view all',
+                'options from', 'starting from', 'starting at',
+                'price hidden', 'price varies', 'varies by',
+                'there are', 'options available', 'click to see',
+                'visit the', 'help page', 'more info',
+                'amazon basics', 'laptop sleeve', 'protective case'
+            ]
+            
+            # Check if text matches invalid patterns
+            if any(pattern in all_text for pattern in invalid_patterns):
+                logger.debug(f"❌ Rejected summary text: {text}")
+                return False
+            
+            # Must have meaningful text
+            if not text or len(text) < 2:
+                return False
+            
+            # Must be a clickable element
+            if not element.is_enabled() or not element.is_displayed():
+                return False
+                
+            # Must have proper attributes indicating it's a variant button
+            data_defaultasin = element.get_attribute('data-defaultasin')
+            data_dp_url = element.get_attribute('data-dp-url')
+            
+            # Prefer elements with variant-specific data attributes
+            if data_defaultasin or data_dp_url:
+                return True
+            
+            # Allow if it has proper aria-label or title
+            if aria_label and len(aria_label) > 2:
+                return True
+                
+            return True  # Default to valid if basic checks pass
+            
+        except Exception as e:
+            logger.debug(f"Element validation failed: {e}")
+            return False
+    
     def _extract_from_dropdowns(self) -> List[Dict]:
-        """Extract variants from dropdown selectors"""
+        """Extract variants from dropdown selectors - IMPROVED TO AVOID SUMMARY TEXT"""
         variants = []
         
         try:
@@ -169,26 +231,39 @@ class AmazonVariantExtractor:
                         option_text = option.text.strip()
                         option_value = option.get_attribute("value") or ""
                         
-                        # Skip placeholder options
+                        # ENHANCED: Skip placeholder and summary options
                         if (option_text in ['Select', 'Choose', 'Size', 'Color', 'Please select'] or
                             not option_text or len(option_text) < 2):
                             continue
                         
-                        # Skip quantity-like options
-                        if (option_text.isdigit() or 
-                            option_text.endswith('+') or 
-                            option_text.startswith('Qty')):
+                        # ENHANCED: Skip summary text patterns
+                        option_text_lower = option_text.lower()
+                        if any(pattern in option_text_lower for pattern in [
+                            'see available', 'see options', 'there are', 'options available',
+                            'starting from', 'price hidden', 'amazon basics'
+                        ]):
                             continue
                         
+                        # ENHANCED: Skip quantity-like options and generic text
+                        if (option_text.isdigit() or 
+                            option_text.endswith('+') or 
+                            option_text.startswith('Qty') or
+                            'laptop sleeve' in option_text_lower or
+                            'protective case' in option_text_lower):
+                            continue
+                        
+                        # ENHANCED: Clean variant name
+                        clean_name = option_text.replace('Color:', '').replace('Size:', '').strip()
+                        
                         variant = {
-                            'type': self._detect_variant_type(select_id, select_name, option_text),
-                            'name': option_text,
+                            'type': self._detect_variant_type(select_id, select_name, clean_name),
+                            'name': clean_name,
                             'value': option_value,
                             'price': None,  # Will be filled later
                             'stock': 50,
-                            'sku': f"VAR-{hash(option_text) % 10000:04d}",
+                            'sku': f"VAR-{hash(clean_name) % 10000:04d}",
                             'images': None,  # Let universal scraper handle image mapping
-                            'attributes': {self._detect_variant_type(select_id, select_name, option_text): option_text}
+                            'attributes': {self._detect_variant_type(select_id, select_name, clean_name): clean_name}
                         }
                         variants.append(variant)
                         
@@ -1198,11 +1273,11 @@ class AmazonVariantExtractor:
         return None
     
     def _clean_variants(self, variants: List[Dict], main_price: float) -> List[Dict]:
-        """Clean and deduplicate variants with enhanced filtering"""
+        """Clean and deduplicate variants with ENHANCED filtering to avoid summary text"""
         cleaned = []
         seen = set()
         
-        # Enhanced invalid patterns
+        # ENHANCED invalid patterns - more comprehensive
         invalid_patterns = [
             r'^\d+\+?$',  # Numbers with optional +
             r'^qty',  # Quantity indicators
@@ -1218,34 +1293,25 @@ class AmazonVariantExtractor:
             r'\d+\s*photos?',  # Number of photos
             r'images?',  # Media content indicators
             r'\d+\s*images?',  # Number of images
-            r'^all departments$',  # Navigation elements
-            r'^arts & crafts$',  # Navigation elements
-            r'^automotive$',  # Navigation elements
-            r'^baby$',  # Navigation elements
-            r'^beauty & personal care$',  # Navigation elements
-            r'^books$',  # Navigation elements
-            r'^boys\' fashion$',  # Navigation elements
-            r'^computers$',  # Navigation elements
-            r'^deals$',  # Navigation elements
-            r'^digital music$',  # Navigation elements
-            r'^electronics$',  # Navigation elements
-            r'^girls\' fashion$',  # Navigation elements
-            r'^health & household$',  # Navigation elements
-            r'^home & kitchen$',  # Navigation elements
-            r'^industrial & scientific$',  # Navigation elements
-            r'^kindle store$',  # Navigation elements
-            r'^luggage$',  # Navigation elements
-            r'^men\'s fashion$',  # Navigation elements
-            r'^movies & tv$',  # Navigation elements
-            r'^music, cds & vinyl$',  # Navigation elements
-            r'^pet supplies$',  # Navigation elements
-            r'^prime video$',  # Navigation elements
-            r'^software$',  # Navigation elements
-            r'^sports & outdoors$',  # Navigation elements
-            r'^tools & home improvement$',  # Navigation elements
-            r'^toys & games$',  # Navigation elements
-            r'^video games$',  # Navigation elements
-            r'^women\'s fashion$',  # Navigation elements
+            
+            # ENHANCED: Amazon-specific summary text patterns
+            r'see available',  # "See available options"
+            r'see options',  # "See options"
+            r'there are \d+',  # "There are 3 options"
+            r'\d+\s*options?',  # "3 options", "10 options"
+            r'options? from',  # "Options from $X"
+            r'starting from',  # "Starting from $X"
+            r'starting at',  # "Starting at $X"
+            r'price hidden',  # "Price hidden"
+            r'price varies',  # "Price varies"
+            r'varies by',  # "Varies by selection"
+            r'amazon basics.*laptop.*sleeve',  # Amazon Basics product names
+            r'protective case.*zipper',  # Product descriptions
+            r'visit the.*help',  # Help text
+            r'click.*see',  # Interaction instructions
+            
+            # Department/navigation elements
+            r'^(all departments|arts & crafts|automotive|baby|beauty & personal care|books|boys\' fashion|computers|deals|digital music|electronics|girls\' fashion|health & household|home & kitchen|industrial & scientific|kindle store|luggage|men\'s fashion|movies & tv|music, cds & vinyl|pet supplies|prime video|software|sports & outdoors|tools & home improvement|toys & games|video games|women\'s fashion)$'
         ]
         
         for variant in variants:
@@ -1254,20 +1320,32 @@ class AmazonVariantExtractor:
                 continue
             
             name = variant['name'].strip()
+            name_lower = name.lower()
             
-            # Check against invalid patterns
+            # ENHANCED: Check against invalid patterns
             is_invalid = False
             for pattern in invalid_patterns:
-                if re.match(pattern, name.lower()):
+                if re.match(pattern, name_lower):
+                    logger.debug(f"🚫 Rejected invalid pattern '{pattern}': {name}")
                     is_invalid = True
                     break
             
             if is_invalid:
                 continue
             
-            # Additional checks
+            # ENHANCED: Additional specific checks
             if (name.isdigit() or name.endswith('+') or 
-                name.startswith('Qty') or name in ['Add to List', 'Update Page']):
+                name.startswith('Qty') or name in ['Add to List', 'Update Page'] or
+                len(name) > 100):  # Reject overly long text
+                logger.debug(f"🚫 Rejected specific check: {name}")
+                continue
+            
+            # ENHANCED: Check for price-like patterns in name (but allow pricing info in parentheses)
+            if (re.search(r'^\$\d+', name) or  # Starts with price
+                'USD' in name.upper() or 
+                'price hidden' in name_lower or
+                'see price' in name_lower):
+                logger.debug(f"🚫 Rejected price pattern: {name}")
                 continue
             
             # Create unique key
@@ -1287,5 +1365,7 @@ class AmazonVariantExtractor:
             variant.setdefault('attributes', {variant['type']: name})
             
             cleaned.append(variant)
+            logger.debug(f"✅ Kept variant: {name} (type: {variant['type']})")
         
+        logger.info(f"🎯 Enhanced cleaning: {len(variants)} → {len(cleaned)} clean variants")
         return cleaned

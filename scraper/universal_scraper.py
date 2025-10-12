@@ -14,6 +14,7 @@ import logging
 import requests
 import re
 import signal
+import asyncio
 from urllib.parse import urljoin, quote_plus, quote
 from dataclasses import dataclass, asdict
 from typing import List, Optional, Dict, Any
@@ -96,7 +97,7 @@ class PerfectVariantFilter:
         
         logger.info(f"🎯 Filtering {len(variants)} variants for: {product_name[:50]}...")
         
-        # STRICT INVALID PATTERNS - These are NEVER real variants
+        # ENHANCED STRICT INVALID PATTERNS - These are NEVER real variants
         invalid_patterns = [
             # Price-related (biggest problem)
             r'^\$[\d,]+\.?\d*',  # Starts with $ and numbers
@@ -106,12 +107,23 @@ class PerfectVariantFilter:
             r'view price',
             r'check price',
             
-            # Quantity/Options text (never real variants)
+            # Amazon-specific summary text (NEW - major improvement)
+            r'see available',  # "See available options"
+            r'see options',  # "See options"
+            r'there are \d+',  # "There are 3 options"
             r'\d+\s*options?\s*(from|available)',  # "2 options from", "10 options available"
             r'^\d+\s*options?$',  # Just "2 options"
             r'starting from',
             r'starting at', 
             r'from \$',
+            r'price varies',
+            r'varies by',
+            r'amazon basics.*laptop.*sleeve',  # Amazon Basics product descriptions
+            r'protective case.*zipper',  # Product descriptions that aren't variants
+            
+            # Quantity/Options text (never real variants)
+            r'visit the.*help',  # Help text
+            r'click.*see',  # Interaction instructions
             
             # UI/Navigation elements
             r'^select',
@@ -962,25 +974,109 @@ class UniversalScraper:
         })
     
     def setup_selenium_driver(self):
-        """Setup undetected Chrome driver with simplified options"""
+        """Setup undetected Chrome driver with maximum compatibility"""
         try:
             if uc is None:
                 logger.warning("undetected-chromedriver not available. Selenium features disabled.")
                 return False
                 
+            # Create fresh options each time to avoid reuse error
             options = uc.ChromeOptions()
+            
+            # Essential compatibility options
             options.add_argument('--no-sandbox')
             options.add_argument('--disable-dev-shm-usage')
+            options.add_argument('--disable-gpu')
+            options.add_argument('--disable-web-security')
+            options.add_argument('--allow-running-insecure-content')
+            options.add_argument('--disable-extensions')
+            options.add_argument('--disable-plugins')
+            options.add_argument('--disable-images')  # Faster loading
+            
+            # Anti-detection (without problematic excludeSwitches)
             options.add_argument('--disable-blink-features=AutomationControlled')
-            options.add_experimental_option("excludeSwitches", ["enable-automation"])
-            options.add_experimental_option('useAutomationExtension', False)
+            options.add_argument('--disable-features=VizDisplayCompositor')
             
-            self.driver = uc.Chrome(options=options)
-            self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            # 🌍 FORCE GLOBAL AMAZON (amazon.com) - No regional redirects
+            options.add_argument('--lang=en-US')
+            options.add_argument('--accept-lang=en-US,en;q=0.9')
             
+            # 🇺🇸 US-based user agent for global Amazon access
+            options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36')
+            
+            # 🌍 Geographic settings to appear as US user
+            options.add_argument('--disable-geolocation')
+            options.add_experimental_option('prefs', {
+                'profile.default_content_setting_values.geolocation': 2,  # Block location
+                'profile.managed_default_content_settings.geolocation': 2,
+                'intl.accept_languages': 'en-US,en',
+                'intl.charset_default': 'UTF-8'
+            })
+            
+            # Performance options for your high-end system (14th gen + RTX 50)
+            options.add_argument('--max_old_space_size=8192')  # 8GB for your system
+            options.add_argument('--memory-pressure-off')
+            options.add_argument('--max-connections-per-host=10')
+            
+            # Window size for consistency
+            options.add_argument('--window-size=1920,1080')
+            
+            # Initialize Chrome with minimal experimental options
+            try:
+                # Try without any experimental options first
+                self.driver = uc.Chrome(options=options, version_main=None)
+                logger.info("Chrome initialized without experimental options")
+            except Exception as e:
+                logger.debug(f"Standard init failed: {e}")
+                
+                # Try with basic experimental options only
+                try:
+                    options.add_experimental_option('useAutomationExtension', False)
+                    self.driver = uc.Chrome(options=options, version_main=None)
+                    logger.info("Chrome initialized with basic experimental options")
+                except Exception as e2:
+                    logger.debug(f"Experimental init failed: {e2}")
+                    
+                    # Final fallback - absolute minimal setup
+                    options = uc.ChromeOptions()
+                    options.add_argument('--no-sandbox')
+                    options.add_argument('--disable-dev-shm-usage')
+                    self.driver = uc.Chrome(options=options)
+                    logger.info("Chrome initialized with minimal options")
+            
+            # Apply stealth scripts after initialization
+            try:
+                self.driver.execute_script("""
+                    Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                    Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+                    Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+                """)
+                
+                # 🌍 FORCE GLOBAL AMAZON: Set location to US
+                self.driver.execute_cdp_cmd('Emulation.setGeolocationOverride', {
+                    'latitude': 40.7128,  # New York coordinates
+                    'longitude': -74.0060,
+                    'accuracy': 100
+                })
+                
+                # 🌍 Set timezone to US Eastern
+                self.driver.execute_cdp_cmd('Emulation.setTimezoneOverride', {
+                    'timezoneId': 'America/New_York'
+                })
+                
+                logger.info("🌍 Geographic settings applied: US location, EN-US language")
+                
+            except Exception as e:
+                logger.debug(f"Stealth/location scripts failed: {e}")
+            
+            # Set stealth_driver alias
+            self.stealth_driver = self.driver
+            
+            logger.info("Chrome driver setup successful for 14th gen + RTX 50 system")
             return True
+            
         except Exception as e:
-            logger.error(f"Failed to setup Selenium driver: {e}")
+            logger.error(f"All Chrome setup attempts failed: {e}")
             return False
     
     def random_delay(self, min_delay=1, max_delay=3):
@@ -1251,22 +1347,33 @@ class UniversalScraper:
             rating_elem = item.select_one(selector)
             if rating_elem:
                 rating_text = rating_elem.get_text(strip=True)
-                rating_match = re.search(r'[\d.]+', rating_text)
-                if rating_match:
-                    rating = float(rating_match.group())
-                    logger.debug(f"Found rating using selector '{selector}': {rating}")
-                    break
+                # 🔧 FIX: Better regex pattern and error handling for rating
+                rating_match = re.search(r'(\d+\.?\d*)', rating_text)  # More specific pattern
+                if rating_match and rating_match.group().strip():
+                    try:
+                        rating = float(rating_match.group())
+                        if 0 <= rating <= 5:  # Valid rating range
+                            logger.debug(f"Found rating using selector '{selector}': {rating}")
+                            break
+                    except (ValueError, AttributeError) as e:
+                        logger.debug(f"Failed to parse rating '{rating_match.group()}': {e}")
+                        continue
         
         # Extract review count
         for selector in review_selectors:
             review_elem = item.select_one(selector)
             if review_elem:
                 review_text = review_elem.get_text(strip=True)
-                review_match = re.search(r'[\d,]+', review_text)
-                if review_match:
-                    review_count = int(review_match.group().replace(',', ''))
-                    logger.debug(f"Found review count using selector '{selector}': {review_count}")
-                    break
+                # 🔧 FIX: Better regex pattern and error handling
+                review_match = re.search(r'(\d[\d,]*)', review_text)  # Must start with digit
+                if review_match and review_match.group().strip():
+                    try:
+                        review_count = int(review_match.group().replace(',', ''))
+                        logger.debug(f"Found review count using selector '{selector}': {review_count}")
+                        break
+                    except (ValueError, AttributeError) as e:
+                        logger.debug(f"Failed to parse review count '{review_match.group()}': {e}")
+                        continue
         
         return rating, review_count
     
@@ -1493,6 +1600,20 @@ class UniversalScraper:
             logger.error(f"Error scraping single product: {e}")
             return []
     
+    def scrape_single_product_sync(self, product_url, site='amazon'):
+        """Synchronous wrapper for scrape_single_product for backward compatibility"""
+        try:
+            # Run the async method in a new event loop
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(self.scrape_single_product(product_url, site))
+            finally:
+                loop.close()
+        except Exception as e:
+            logger.error(f"Error in sync wrapper: {e}")
+            return []
+    
     def _scrape_amazon_single_product(self, product_url):
         """Scrape a single Amazon product from URL"""
         try:
@@ -1552,6 +1673,11 @@ class UniversalScraper:
             self.emit_update('status_update', {'current_status': f'Searching Amazon for: {keyword}'})
             
             search_url = f"https://www.amazon.com/s?k={quote_plus(keyword)}&ref=sr_pg_1"
+            
+            # 🌍 ENSURE GLOBAL AMAZON: Force amazon.com domain
+            search_url = self._ensure_global_amazon_url(search_url)
+            logger.info(f"🌍 Using global Amazon URL: {search_url}")
+            
             response = self.safe_request(search_url)
             
             if not response:
@@ -1659,25 +1785,45 @@ class UniversalScraper:
                     except Exception as e:
                         logger.warning(f"Failed to fetch product page for variants: {e}")
 
-                    # 🎯 USE OUR PERFECT VARIANT EXTRACTION - GUARANTEED TO WORK!
-                    logger.info(f"🎯 Using PERFECT variant extraction for: {title[:50]}...")
+                    # 🚀 USE ENHANCED VARIANT EXTRACTION - REAL PRICES SYSTEM!
+                    logger.info(f"🚀 Using ENHANCED variant extraction for: {title[:50]}...")
                     
-                    # Get all possible variants using comprehensive extraction
-                    raw_variants = self._extract_all_amazon_variants_perfect(product_soup or soup, product_url, title, price)
-                    logger.info(f"🎯 Raw extraction found {len(raw_variants)} potential variants")
-                    
-                    # Apply perfect filtering to get clean results
-                    if raw_variants:
-                        variants = self.variant_filter.filter_variants(raw_variants, title, price)
-                        logger.info(f"🎯 Perfect filtering resulted in {len(variants)} clean variants")
+                    # Try enhanced extraction with real prices first
+                    variants = []
+                    try:
+                        from enhanced_variant_extractor import EnhancedVariantPriceExtractor
+                        enhanced_extractor = EnhancedVariantPriceExtractor(self.stealth_driver)
+                        # 🌍 ENSURE GLOBAL AMAZON URL for variant extraction
+                        global_product_url = self._ensure_global_amazon_url(product_url)
+                        variants = enhanced_extractor.extract_variants_with_real_prices(global_product_url, title, price)
                         
-                        # Log final results
                         if variants:
-                            variant_names = [v.get('name', 'Unknown') for v in variants[:15]]
-                            logger.info(f"✅ FINAL VARIANTS: {', '.join(variant_names)}")
-                    else:
-                        variants = []
-                        logger.info("No variants found for this product")
+                            logger.info(f"🚀 Enhanced extraction found {len(variants)} variants with REAL prices")
+                            variant_names = [v.get('name', 'Unknown') for v in variants[:10]]
+                            logger.info(f"✅ ENHANCED VARIANTS: {', '.join(variant_names)}")
+                        else:
+                            logger.info("🔍 Enhanced extraction found no variants - trying fallback...")
+                            raise Exception("No variants found, using fallback")
+                            
+                    except Exception as e:
+                        logger.warning(f"Enhanced extraction failed: {e}")
+                        logger.info("🔄 Using fallback extraction...")
+                        
+                        # 🚨 CRITICAL FIX: Only use fallback if enhanced system had an ERROR, not if it found 0 variants
+                        if "No variants found" in str(e):
+                            logger.info("✅ Enhanced system correctly found NO variants - skipping fallback to avoid fake variants")
+                            variants = []
+                        else:
+                            # Fallback to basic extraction with PRICE PRESERVATION
+                            raw_variants = self._extract_all_amazon_variants_perfect(product_soup or soup, product_url, title, price)
+                            if raw_variants:
+                                # IMPORTANT: Preserve any existing prices in raw variants
+                                for variant in raw_variants:
+                                    if not variant.get('price') or variant.get('price') <= 0:
+                                        variant['price'] = price  # Only set main price if no price exists
+                                
+                                variants = self.variant_filter.filter_variants(raw_variants, title, price)
+                                logger.info(f"🔄 Fallback found {len(variants)} variants with preserved prices")
                     
                     # Extract structured data for enhanced accuracy
                     structured_data = self._extract_structured_data(product_soup or soup, title)
@@ -1743,6 +1889,12 @@ class UniversalScraper:
                     # Enhance product with structured data for better accuracy
                     product = self._enhance_product_with_structured_data(product, structured_data)
                     
+                    # 🔧 CRITICAL FIX: Update product type after enhancement if variants exist
+                    if product.variants and len(product.variants) > 0:
+                        if product.product_type == "Single Product":
+                            product.product_type = "Variant"
+                            logger.info(f"🔧 FIXED: Updated product type to 'Variant' for product with {len(product.variants)} variants")
+                    
                     if self.add_product(product):
                         products_added += 1
                 
@@ -1752,13 +1904,44 @@ class UniversalScraper:
                     import traceback
                     logger.error(f"❌ Full traceback: {traceback.format_exc()}")
                     continue
-                
-                self.random_delay(3, 8)  # Reasonable delays
-            
-            self.random_delay(10, 20)  # Delays between keywords
+        
+        self.random_delay(3, 8)  # Reasonable delays
+        
+        self.random_delay(10, 20)  # Delays between keywords
         
         logger.info(f"Amazon scraping completed: {products_added} products")
         return self.scraped_products[-products_added:]
+    
+    def _ensure_global_amazon_url(self, url: str) -> str:
+        """Ensure Amazon URL uses global domain (amazon.com) with USD prices"""
+        import re
+        
+        # Replace regional Amazon domains with global amazon.com
+        regional_domains = [
+            r'amazon\.pk',   # Pakistan
+            r'amazon\.ae',   # UAE
+            r'amazon\.co\.uk', # UK
+            r'amazon\.de',   # Germany
+            r'amazon\.fr',   # France
+            r'amazon\.in',   # India
+            r'amazon\.ca',   # Canada
+            r'amazon\.com\.au', # Australia
+            r'amazon\.co\.jp',  # Japan
+        ]
+        
+        for domain in regional_domains:
+            if re.search(domain, url, re.IGNORECASE):
+                url = re.sub(domain, 'amazon.com', url, flags=re.IGNORECASE)
+                logger.info(f"🌍 CONVERTED REGIONAL AMAZON URL to global: {url}")
+                break
+        
+        # Add currency preference for USD
+        if '?' in url:
+            url += '&currency=USD&language=en_US'
+        else:
+            url += '?currency=USD&language=en_US'
+        
+        return url
     
     def scrape_product_images(self, product_url, site='amazon', max_images=20):
         """AI-Powered image scraping with 100% accuracy target"""
@@ -6235,31 +6418,66 @@ class UniversalScraper:
             if main_image and main_image in additional_images:
                 additional_images.remove(main_image)
             
-            # 🎯 PERFECT VARIANT EXTRACTION - One method, always works!
+            # 🚀 ENHANCED VARIANT EXTRACTION - Real Prices System
             variants = []
             
             try:
-                logger.info(f"🎯 Using PERFECT variant extraction for: {title[:50]}...")
+                logger.info(f"🚀 Using ENHANCED variant extraction for: {title[:50]}...")
                 
-                # Get all possible variants using comprehensive extraction
-                raw_variants = self._extract_all_amazon_variants_perfect(soup, product_url, title, price)
-                logger.info(f"🎯 Raw extraction found {len(raw_variants)} potential variants")
-                
-                # Apply perfect filtering to get clean results
-                if raw_variants:
-                    variants = self.variant_filter.filter_variants(raw_variants, title, price)
-                    logger.info(f"🎯 Perfect filtering resulted in {len(variants)} clean variants")
+                # Try enhanced extraction with real prices first
+                try:
+                    from enhanced_variant_extractor import EnhancedVariantPriceExtractor
+                    enhanced_extractor = EnhancedVariantPriceExtractor(self.stealth_driver)
                     
-                    # Log final results
-                    if variants:
-                        variant_names = [v.get('name', 'Unknown') for v in variants[:15]]
-                        logger.info(f"✅ FINAL VARIANTS: {', '.join(variant_names)}")
-                else:
-                    logger.info("No variants found for this product")
+                    logger.info(f"🔍 DEBUG: About to call enhanced extraction...")
+                    # 🌍 ENSURE GLOBAL AMAZON URL for variant extraction
+                    global_product_url = self._ensure_global_amazon_url(product_url)
+                    extracted_variants = enhanced_extractor.extract_variants_with_real_prices(global_product_url, title, price)
+                    logger.info(f"🔍 DEBUG: Enhanced extractor returned {len(extracted_variants) if extracted_variants else 0} variants")
+                    
+                    if extracted_variants and len(extracted_variants) > 0:
+                        variants = extracted_variants
+                        logger.info(f"🚀 Enhanced extraction found {len(variants)} variants with REAL prices")
+                        variant_names = [v.get('name', 'Unknown') for v in variants[:10]]
+                        logger.info(f"✅ ENHANCED VARIANTS: {', '.join(variant_names)}")
+                        
+                        # DEBUG: Log first few variants in detail
+                        for i, variant in enumerate(variants[:3]):
+                            logger.info(f"🔍 DEBUG Variant {i+1}: name='{variant.get('name')}', price=${variant.get('price')}, type={variant.get('type')}")
+                    else:
+                        logger.info("🔍 Enhanced extraction found no variants - trying fallback...")
+                        raise Exception("No variants found, using fallback")
+                        
+                except Exception as e:
+                    logger.warning(f"Enhanced extraction failed: {e}")
+                    logger.info("🔄 Using fallback extraction...")
+                    
+                    # 🚨 CRITICAL FIX: Only use fallback if enhanced system had an ERROR, not if it found 0 variants
+                    if "No variants found" in str(e):
+                        logger.info("✅ Enhanced system correctly found NO variants - skipping fallback to avoid fake variants")
+                        variants = []
+                    else:
+                        # Fallback to basic extraction with PRICE PRESERVATION
+                        raw_variants = self._extract_all_amazon_variants_perfect(soup, product_url, title, price)
+                        if raw_variants:
+                            # IMPORTANT: Preserve any existing prices in raw variants
+                            for variant in raw_variants:
+                                if not variant.get('price') or variant.get('price') <= 0:
+                                    variant['price'] = price  # Only set main price if no price exists
+                            
+                            variants = self.variant_filter.filter_variants(raw_variants, title, price)
+                            logger.info(f"🔄 Fallback found {len(variants)} variants with preserved prices")
                 
             except Exception as e:
                 logger.error(f"Variant extraction failed: {e}")
                 variants = []
+            
+            # 🚨 CRITICAL DEBUG: Log final variant count before product creation
+            logger.info(f"🚨 DEBUG: Final variant count before product creation: {len(variants)}")
+            if variants:
+                logger.info(f"🚨 DEBUG: First variant details: {variants[0]}")
+            else:
+                logger.warning(f"🚨 DEBUG: NO VARIANTS - Product will be marked as Single Product")
             
             # Extract rating and reviews
             rating = 0.0
@@ -6671,4 +6889,51 @@ class UniversalScraper:
             
         except Exception as e:
             logger.debug(f"Error extracting variants from text: {e}")
+            return []
+    
+    async def _extract_variants_professional(self, product_url: str, product_name: str, main_price: float) -> List[Dict]:
+        """
+        Professional variant extraction using the 95%+ accuracy system
+        Integrated directly into the existing workflow
+        """
+        try:
+            # Import professional system
+            from professional_integration_bridge import ProfessionalIntegrationBridge
+            
+            logger.info("🚀 Initializing professional variant extraction system...")
+            
+            # Initialize professional bridge
+            bridge = ProfessionalIntegrationBridge(use_professional=True)
+            
+            # Extract variants using professional system
+            result = await bridge.extract_variants(product_url, product_name)
+            
+            # Extract variants from result
+            professional_variants = result.get('variants', [])
+            
+            # Convert professional variants to your existing format
+            converted_variants = []
+            for variant in professional_variants:
+                converted_variant = {
+                    'type': variant.get('type', 'variant'),
+                    'name': variant.get('name', 'Unknown'),
+                    'price': variant.get('price', main_price),
+                    'stock': variant.get('stock', 50),
+                    'sku': variant.get('sku', f"PROF-{hash(variant.get('name', '')) % 10000:04d}"),
+                    'images': variant.get('images', []),
+                    'attributes': variant.get('attributes', {variant.get('type', 'variant'): variant.get('name', 'Unknown')})
+                }
+                converted_variants.append(converted_variant)
+            
+            # Cleanup professional system
+            await bridge.cleanup()
+            
+            logger.info(f"🚀 Professional system extracted {len(converted_variants)} variants")
+            return converted_variants
+            
+        except ImportError:
+            logger.warning("Professional variant extraction system not available, using fallback")
+            return []
+        except Exception as e:
+            logger.error(f"Professional variant extraction failed: {e}")
             return []
