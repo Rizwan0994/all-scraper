@@ -1013,6 +1013,15 @@ class UniversalScraper:
             # 🇺🇸 US-based user agent for global Amazon access
             options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36')
             
+            # 🌍 SIMULATE US TRAFFIC (without proxy to avoid connection issues)
+            # options.add_argument('--proxy-server=socks5://127.0.0.1:1080')  # Uncomment if you have VPN
+            # options.add_argument('--proxy-bypass-list=<-loopback>')
+            
+            # 🌍 Force US-based headers
+            options.add_argument('--accept-language=en-US,en;q=0.9')
+            options.add_argument('--accept-encoding=gzip, deflate, br')
+            options.add_argument('--accept=text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8')
+            
             # 🌍 Geographic settings to appear as US user - FORCE USD CURRENCY
             options.add_argument('--disable-geolocation')
             options.add_argument('--disable-geolocation-on-insecure-origins')
@@ -1086,58 +1095,84 @@ class UniversalScraper:
                     'timezoneId': 'America/New_York'
                 })
                 
-                # 💰 FORCE USD CURRENCY: Navigate to Amazon and set currency cookies
-                logger.info("💰 Setting USD currency preference...")
-                self.driver.get('https://www.amazon.com')
-                time.sleep(2)
+                # 💰 AGGRESSIVE USD FORCING: Multiple approaches
+                logger.info("💰 AGGRESSIVELY forcing USD currency...")
                 
-                # Set cookies to force USD currency
-                self.driver.add_cookie({
-                    'name': 'i18n-prefs',
-                    'value': 'USD',
-                    'domain': '.amazon.com',
-                    'path': '/',
-                })
+                # Step 1: Navigate to Amazon US with explicit parameters
+                self.driver.get('https://www.amazon.com/?currency=USD&language=en_US&region=US')
+                time.sleep(3)
                 
-                self.driver.add_cookie({
-                    'name': 'lc-main',
-                    'value': 'en_US',
-                    'domain': '.amazon.com',
-                    'path': '/',
-                })
+                # Step 2: Clear ALL existing cookies first
+                self.driver.delete_all_cookies()
+                time.sleep(1)
                 
-                # Navigate to Amazon currency selector and force USD
+                # Step 3: Set MULTIPLE USD cookies with different approaches
+                usd_cookies = [
+                    {'name': 'i18n-prefs', 'value': 'USD', 'domain': '.amazon.com'},
+                    {'name': 'lc-main', 'value': 'en_US', 'domain': '.amazon.com'},
+                    {'name': 'currency', 'value': 'USD', 'domain': '.amazon.com'},
+                    {'name': 'language', 'value': 'en_US', 'domain': '.amazon.com'},
+                    {'name': 'region', 'value': 'US', 'domain': '.amazon.com'},
+                    {'name': 'aws-target-data', 'value': '{"country":"US","currency":"USD"}', 'domain': '.amazon.com'},
+                    {'name': 'aws-target-visitor-id', 'value': 'US', 'domain': '.amazon.com'},
+                    {'name': 'aws-target-account', 'value': 'US', 'domain': '.amazon.com'},
+                    {'name': 'session-id', 'value': 'US', 'domain': '.amazon.com'},
+                    {'name': 'session-id-time', 'value': 'US', 'domain': '.amazon.com'},
+                ]
+                
+                for cookie in usd_cookies:
+                    try:
+                        self.driver.add_cookie(cookie)
+                    except:
+                        pass
+                
+                # Step 4: Navigate to Amazon with FORCED US parameters
+                self.driver.get('https://www.amazon.com/?currency=USD&language=en_US&region=US&delivery=US')
+                time.sleep(3)
+                
+                # Step 5: Execute JavaScript to force US locale
                 try:
-                    self.driver.get('https://www.amazon.com/customer-preferences/edit?ie=UTF8&preferencesReturnUrl=%2F&ref_=footer_cop')
-                    time.sleep(2)
-                    
-                    # Try to select USD from dropdown
-                    from selenium.webdriver.common.by import By
-                    from selenium.webdriver.support.ui import Select
-                    from selenium.webdriver.support.ui import WebDriverWait
-                    from selenium.webdriver.support import expected_conditions as EC
-                    
-                    try:
-                        currency_select = WebDriverWait(self.driver, 5).until(
-                            EC.presence_of_element_located((By.ID, "icp-sc-dropdown"))
-                        )
-                        select = Select(currency_select)
-                        select.select_by_value('USD')
-                        logger.info("✅ Selected USD from currency dropdown")
-                    except:
-                        logger.debug("Currency dropdown not found, cookies should work")
-                    
-                    # Click save if button exists
-                    try:
-                        save_button = self.driver.find_element(By.CSS_SELECTOR, "input[type='submit']")
-                        save_button.click()
-                        time.sleep(1)
-                        logger.info("✅ Saved USD currency preference")
-                    except:
-                        logger.debug("Save button not found, proceeding")
+                    self.driver.execute_script("""
+                        // Force US locale in browser
+                        if (window.localStorage) {
+                            localStorage.setItem('i18n-prefs', 'USD');
+                            localStorage.setItem('lc-main', 'en_US');
+                            localStorage.setItem('currency', 'USD');
+                            localStorage.setItem('region', 'US');
+                        }
                         
+                        // Force session storage
+                        if (window.sessionStorage) {
+                            sessionStorage.setItem('i18n-prefs', 'USD');
+                            sessionStorage.setItem('lc-main', 'en_US');
+                            sessionStorage.setItem('currency', 'USD');
+                            sessionStorage.setItem('region', 'US');
+                        }
+                        
+                        // Override Amazon's location detection
+                        if (window.navigator) {
+                            Object.defineProperty(window.navigator, 'language', {value: 'en-US'});
+                            Object.defineProperty(window.navigator, 'languages', {value: ['en-US', 'en']});
+                        }
+                    """)
+                    logger.info("✅ JavaScript locale override applied")
                 except Exception as e:
-                    logger.debug(f"Currency preference page navigation failed: {e}")
+                    logger.debug(f"JavaScript locale override failed: {e}")
+                
+                # Step 6: Navigate to a product page to test
+                self.driver.get('https://www.amazon.com/dp/B08N5WRWNW?currency=USD&language=en_US&region=US')
+                time.sleep(3)
+                
+                # Step 7: Check if PKR is still showing and force refresh
+                page_source = self.driver.page_source
+                if 'PKR' in page_source or 'Rs.' in page_source:
+                    logger.warning("🚨 PKR still detected! Forcing page refresh...")
+                    self.driver.refresh()
+                    time.sleep(3)
+                    
+                    # Try one more aggressive approach
+                    self.driver.execute_script("window.location.href = 'https://www.amazon.com/?currency=USD&language=en_US&region=US';")
+                    time.sleep(3)
                 
                 logger.info("🌍 Geographic settings applied: US location, EN-US language, USD currency")
                 
@@ -2874,17 +2909,10 @@ class UniversalScraper:
         product_key = product.source_url.strip()
         product_name_key = product.product_name.strip().lower()
         
-        # Check URL duplicates
+        # Check URL duplicates ONLY
         if product_key in self.scraped_urls:
             logger.info(f"Duplicate URL skipped: {product.product_name[:50]}...")
             return False
-            
-        # Check for similar product names (fuzzy matching)
-        for existing_product in self.scraped_products:
-            if (existing_product.product_name.strip().lower() == product_name_key and 
-                existing_product.source_site == product.source_site):
-                logger.info(f"Duplicate product name skipped: {product.product_name[:50]}...")
-                return False
         
         # 🎯 PERFECT EXTRACTION - No AI verification needed!
         logger.info(f"🎯 Product ready to save: {len(product.variants)} variants extracted perfectly!")
@@ -4515,7 +4543,9 @@ class UniversalScraper:
             products_found_for_keyword = 0
             
             for search_url in search_urls:
-                if products_found_for_keyword >= 20:  # Limit per keyword
+                # Dynamic limit per keyword based on max_products
+                keyword_limit = max(20, max_products // len(keywords) if keywords else 20)
+                if products_found_for_keyword >= keyword_limit:  # Limit per keyword
                     break
                     
                 response = self.safe_request(search_url)
@@ -4559,8 +4589,10 @@ class UniversalScraper:
                     else:
                         logger.debug(f"Daraz: Found {len(items)} items for '{keyword}'")
                     
-                    for i, item in enumerate(items[:25]):  # Process more items
-                        if products_added >= max_products or products_found_for_keyword >= 20:
+                    # Process items with dynamic limit based on max_products
+                    item_limit = min(50, max_products // len(keywords) if keywords else 50)
+                    for i, item in enumerate(items[:item_limit]):  # Process more items
+                        if products_added >= max_products or products_found_for_keyword >= item_limit:
                             break
                             
                         try:

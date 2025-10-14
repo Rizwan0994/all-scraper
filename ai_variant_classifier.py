@@ -289,7 +289,13 @@ reasoning: explanation"""
             # Feature descriptions
             r'\b(waterproof|water resistant|shockproof|dustproof|scratch resistant|anti glare|anti fingerprint|anti bacterial|anti microbial|hypoallergenic|organic|natural|eco friendly|sustainable|recyclable)\b',
             # Quality descriptors
-            r'\b(premium|professional|commercial|industrial|heavy duty|lightweight|portable|compact|foldable|adjustable|removable|detachable|reversible|dual|multi|single|triple|quad)\b'
+            r'\b(premium|professional|commercial|industrial|heavy duty|lightweight|portable|compact|foldable|adjustable|removable|detachable|reversible|dual|multi|single|triple|quad)\b',
+            # 🎯 NEW: Product specifications and details
+            r'\b(brand|color|ear placement|form factor|impedance|what\'s in the box|reviews|images|photos|customer|rating|stars|shipping|delivery|return|warranty|support|manual|guide|instructions)\b',
+            # 🎯 NEW: UI elements and navigation
+            r'\b(see similar|see all|buying options|add to list|learn more|dismiss|change address|sign in|account|lists|orders|returns|cart|checkout|payment|shipping|delivery)\b',
+            # 🎯 NEW: Product information sections
+            r'\b(about this item|product details|specifications|features|benefits|description|overview|summary|highlights|key features|what\'s included|package contents|dimensions|weight|measurements)\b'
         ]
         
         # Check for fake patterns first (higher priority)

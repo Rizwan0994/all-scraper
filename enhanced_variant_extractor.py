@@ -667,9 +667,22 @@ class EnhancedVariantPriceExtractor:
         
         original_text = price_text
         
-        # 🚨 REJECT NON-USD CURRENCIES - We only want real USD prices
-        if any(currency in price_text.upper() for currency in ['PKR', 'AED', 'GBP', 'EUR', 'Rs', '₨', '₹', 'AED', 'د.إ']):
-            logger.warning(f"🚨 REJECTED NON-USD CURRENCY: {price_text}")
+        # 🚨 AGGRESSIVE REJECTION OF NON-USD CURRENCIES
+        non_usd_currencies = [
+            'PKR', 'AED', 'GBP', 'EUR', 'Rs', '₨', '₹', 'د.إ',
+            'rupee', 'rupees', 'pkr', 'aed', 'gbp', 'eur',
+            'rs.', 'rs ', '₹', '₨', 'د.إ', '£', '€'
+        ]
+        
+        price_upper = price_text.upper()
+        for currency in non_usd_currencies:
+            if currency.upper() in price_upper:
+                logger.warning(f"🚨 REJECTED NON-USD CURRENCY '{currency}' in: {price_text}")
+                return None
+        
+        # 🚨 ADDITIONAL PKR DETECTION
+        if 'PKR' in price_upper or 'Rs.' in price_upper or 'Rs ' in price_upper:
+            logger.warning(f"🚨 REJECTED PAKISTANI CURRENCY: {price_text}")
             return None
         
         # Only accept prices with $ symbol or clear USD indication

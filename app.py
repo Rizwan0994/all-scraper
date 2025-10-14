@@ -100,7 +100,7 @@ def start_scraping():
     try:
         data = request.get_json()
         keywords = data.get('keywords', '').split(',')
-        max_products = data.get('max_products', 200)
+        max_products = data.get('max_products', 10000)
         selected_sites = data.get('selected_sites', [])
         
         logger.info(f"Starting scraping with keywords: {keywords}")

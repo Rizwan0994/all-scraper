@@ -63,7 +63,7 @@ def main():
             print(f"📋 Total keywords: {len(keywords)}")
             print(f"🎯 Sample keywords: {', '.join(keywords[:15])}...")
             
-            max_products = int(input("Max products per site (default 200): ") or 200)
+            max_products = int(input("Max products per site (default 10000): ") or 10000)
             
             print(f"\n🚀 Starting enhanced scraping for 10K+ products")
             print(f"Max products per site: {max_products}")

@@ -141,7 +141,7 @@ class ChunkManager:
             logger.error(f"Failed to save to CSV: {e}")
     
     def _filter_duplicates(self, new_products: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Filter out duplicate products by checking against existing products in chunks"""
+        """Filter out duplicate products by checking ONLY source URLs"""
         if not new_products:
             return []
         
@@ -153,35 +153,24 @@ class ChunkManager:
         
         for product in new_products:
             source_url = product.get('source_url', '').strip()
-            product_name = product.get('product_name', '').strip().lower()
             
-            # Skip if URL already exists
+            # Skip ONLY if exact URL already exists
             if source_url in existing_urls:
                 duplicates_found += 1
                 logger.debug(f"Duplicate URL skipped: {product.get('product_name', 'Unknown')[:50]}...")
                 continue
             
-            # Additional check for similar product names from same site
-            is_duplicate = False
-            for existing_url, existing_name in existing_urls.items():
-                if (product_name == existing_name.lower() and 
-                    product.get('source_site') == self._get_site_from_url(existing_url)):
-                    is_duplicate = True
-                    duplicates_found += 1
-                    logger.debug(f"Duplicate product name skipped: {product.get('product_name', 'Unknown')[:50]}...")
-                    break
-            
-            if not is_duplicate:
-                filtered_products.append(product)
+            # Add product if URL is unique
+            filtered_products.append(product)
         
         if duplicates_found > 0:
-            logger.info(f"Filtered out {duplicates_found} duplicate products")
+            logger.info(f"Filtered out {duplicates_found} duplicate URLs")
         
         return filtered_products
     
-    def _get_existing_product_urls(self) -> Dict[str, str]:
-        """Get all existing product URLs and names from chunks for deduplication"""
-        existing_urls = {}
+    def _get_existing_product_urls(self) -> set:
+        """Get all existing product URLs from chunks for deduplication"""
+        existing_urls = set()
         
         try:
             index = self._load_or_create_index()
@@ -195,30 +184,14 @@ class ChunkManager:
                     
                     for product in chunk_data.get("products", []):
                         source_url = product.get('source_url', '').strip()
-                        product_name = product.get('product_name', '').strip()
                         if source_url:
-                            existing_urls[source_url] = product_name
+                            existing_urls.add(source_url)
                             
         except Exception as e:
             logger.warning(f"Error loading existing URLs for deduplication: {e}")
         
         return existing_urls
     
-    def _get_site_from_url(self, url: str) -> str:
-        """Extract site name from URL"""
-        if 'amazon.com' in url:
-            return 'Amazon'
-        elif 'ebay.com' in url:
-            return 'eBay'
-        elif 'daraz.pk' in url:
-            return 'Daraz'
-        elif 'aliexpress.com' in url:
-            return 'AliExpress'
-        elif 'etsy.com' in url:
-            return 'Etsy'
-        elif 'valuebox.pk' in url:
-            return 'ValueBox'
-        return 'Unknown'
 
     def _process_temp_products(self):
         """Process temporary products and add to chunks"""

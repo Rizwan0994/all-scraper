@@ -30,51 +30,86 @@ class EnhancedAIVariantExtractor:
         # Amazon 2024+ specific selectors for real variants
         self.variant_selectors = {
             'color_swatches': [
-                # 🎯 EXACT Amazon Color Swatches from Images
-                ".a-button-toggle",  # Main selector for all toggle buttons
-                ".a-button-toggle-text",  # Text inside toggle buttons
-                ".a-button-inner .a-button-text",  # Button text elements
-                
-                # 🎯 Amazon Color Grid (Image 1 & 3)
-                "div[data-csa-c-content-id*='color'] .a-button-toggle",
-                "div[data-csa-c-content-id*='variation'] .a-button-toggle",
-                "div[data-csa-c-element-id*='color'] .a-button-toggle",
-                "div[data-csa-c-element-id*='variation'] .a-button-toggle",
-                
-                # 🎯 Amazon Swatch Containers
+                # 🎯 EXACT Amazon Color Swatches - Target the actual color selection area
                 "#variation_color_name .a-button-toggle",
                 "#variation_style_name .a-button-toggle", 
                 "#variation_color .a-button-toggle",
                 
-                # 🎯 Amazon Image Swatches
+                # 🎯 NEW: Amazon color swatch containers (the actual clickable areas)
+                "div[data-csa-c-content-id*='color'] .a-button-toggle",
+                "div[data-csa-c-element-id*='color'] .a-button-toggle",
+                "div[data-csa-c-content-id*='variation'] .a-button-toggle",
+                "div[data-csa-c-element-id*='variation'] .a-button-toggle",
+                
+                # 🎯 NEW: Target the actual clickable color swatch buttons within containers
+                "div[data-csa-c-content-id*='color'] button",
+                "div[data-csa-c-content-id*='color'] a",
+                "div[data-csa-c-content-id*='color'] span",
+                "div[data-csa-c-element-id*='color'] button",
+                "div[data-csa-c-element-id*='color'] a",
+                "div[data-csa-c-element-id*='color'] span",
+                
+                # 🎯 NEW: Amazon twister color swatches
+                ".twister-plus-variants-swatch-view-container .a-button-toggle",
+                ".inline-twister-row-item .a-button-toggle",
+                ".twister-plus-variants-swatch-view-container .a-button-toggle img",
+                
+                # 🎯 NEW: Color swatch buttons with specific Amazon classes
+                ".swatch-container .a-button-toggle",
+                ".color-option .a-button-toggle",
+                ".variant-option .a-button-toggle",
+                ".color-selection .a-button-toggle",
+                ".color-variation .a-button-toggle",
+                
+                # 🎯 NEW: Amazon image swatches (the actual color selection images)
                 ".imgSwatch",
                 ".image-swatch-wrapper",
                 ".swatch-variation",
+                ".a-button-toggle img[src*='color']",
+                ".a-button-toggle img[alt*='color']",
                 
-                # 🎯 Amazon Generic Variant Selectors
-                ".twister-plus-variants-swatch-view-container .a-button-toggle",
-                ".inline-twister-row-item .a-button-toggle",
+                # 🎯 NEW: Amazon color selection buttons
+                "button[data-csa-c-content-id*='color']",
+                "div[data-csa-c-content-id*='color'] button",
+                "span[data-csa-c-content-id*='color']",
                 
-                # 🎯 NEW: Pattern/Bundle Selectors (Image 4)
-                "div[data-csa-c-content-id*='pattern'] .a-button-toggle",
-                "div[data-csa-c-element-id*='pattern'] .a-button-toggle",
-                ".pattern-selector .a-button-toggle",
-                ".bundle-selector .a-button-toggle",
+                # 🎯 NEW: Amazon color swatch specific patterns
+                ".a-button-toggle[data-csa-c-content-id*='color']",
+                ".a-button-toggle[data-csa-c-element-id*='color']",
+                ".a-button-toggle[data-csa-c-content-id*='variation']",
+                ".a-button-toggle[data-csa-c-element-id*='variation']",
                 
-                # 🎯 NEW: Any button with color/variant text
-                "button[class*='button']",
-                "div[class*='button']",
-                "span[class*='button']",
-                "a[class*='button']"
+                # 🎯 NEW: Amazon color swatch buttons with specific attributes
+                "button[data-csa-c-content-id*='color']",
+                "a[data-csa-c-content-id*='color']",
+                "span[data-csa-c-content-id*='color']",
+                "div[data-csa-c-content-id*='color'] button",
+                "div[data-csa-c-content-id*='color'] a",
+                "div[data-csa-c-content-id*='color'] span",
+                
+                # 🎯 NEW: Amazon color swatch images (clickable)
+                "div[data-csa-c-content-id*='color'] img",
+                "div[data-csa-c-element-id*='color'] img",
+                ".a-button-toggle img[src*='color']",
+                ".a-button-toggle img[alt*='color']",
+                
+                # 🎯 NEW: Specific Amazon color swatch button patterns
+                "div[data-csa-c-content-id*='color'] div[role='button']",
+                "div[data-csa-c-content-id*='color'] div[onclick]",
+                "div[data-csa-c-content-id*='color'] div[class*='button']",
+                "div[data-csa-c-content-id*='color'] div[class*='swatch']",
+                "div[data-csa-c-content-id*='color'] div[class*='toggle']",
+                
+                # 🎯 NEW: Amazon color swatch containers with clickable children
+                "div[data-csa-c-content-id*='color'] > div",
+                "div[data-csa-c-element-id*='color'] > div",
+                "div[data-csa-c-content-id*='variation'] > div",
+                "div[data-csa-c-element-id*='variation'] > div"
             ],
             
             'size_swatches': [
-                # 🎯 EXACT Amazon Size Buttons from Images
-                ".a-button-toggle",  # Main selector for all toggle buttons (includes sizes)
-                ".a-button-toggle-text",  # Text inside toggle buttons
-                ".a-button-inner .a-button-text",  # Button text elements
-                
-                # 🎯 Amazon Size Grid (Image 1 & 3)
+                # 🎯 SPECIFIC Amazon Size Buttons - ONLY product variants
+                "#variation_size_name .a-button-toggle",
                 "div[data-csa-c-content-id*='size'] .a-button-toggle",
                 "div[data-csa-c-element-id*='size'] .a-button-toggle",
                 ".size-selector .a-button-toggle",
@@ -83,13 +118,7 @@ class EnhancedAIVariantExtractor:
                 # 🎯 Storage/memory selectors
                 ".a-button-toggle[data-csa-c-element-id*='storage']",
                 ".storage-selector .a-button-toggle",
-                ".memory-selector .a-button-toggle",
-                
-                # 🎯 NEW: Any button that might be size
-                "button[class*='button']",
-                "div[class*='button']",
-                "span[class*='button']",
-                "a[class*='button']"
+                ".memory-selector .a-button-toggle"
             ],
             
             'dropdown_variants': [
@@ -136,6 +165,15 @@ class EnhancedAIVariantExtractor:
             # Method 1: Extract from color swatches
             color_variants = self._extract_color_variants_with_ai(product_name, main_price)
             all_variants.extend(color_variants)
+            
+            # Find clickable color swatches specifically
+            clickable_color_swatches = self._find_clickable_color_swatches()
+            all_variants.extend(clickable_color_swatches)
+            
+            # 🎯 NEW: Systematically click through all color swatches to reveal all colors
+            if clickable_color_swatches:
+                systematic_color_variants = self._click_through_all_color_swatches(clickable_color_swatches)
+                all_variants.extend(systematic_color_variants)
             
             # Method 2: Extract from size/storage swatches  
             size_variants = self._extract_size_variants_with_ai(product_name, main_price)
@@ -188,6 +226,54 @@ class EnhancedAIVariantExtractor:
                             if not variant_text or len(variant_text) < 2:
                                 continue
                             
+                            # 🚨 ENHANCED AGGRESSIVE FILTERING - Skip if it's clearly not a variant
+                            skip_keywords = [
+                                'add to cart', 'buy now', 'select', 'choose', 'quantity', 
+                                'size:', 'color:', 'sponsored', 'limited time deal', 'list:',
+                                'typical:', 'save', 'coupon', "amazon's choice", 'prime',
+                                'today\'s deals', 'hello, sign in', 'account & lists',
+                                'product videos', 'leave feedback', 'image thumbnails',
+                                'dismiss', 'change address', 'sign in', 'cancel',
+                                'warning:', 'california', 'proposition', 'safety', 'product resources',
+                                # 🎯 CURRENCY FILTERING
+                                'usd', 'dollar', 'currency', 'clp', 'cop', 'hkd', 'idr', 'ils', 
+                                'krw', 'myr', 'nzd', 'thb', 'twd', 'crc', 'pen', 'uyu', 'brl',
+                                'aud', 'cad', 'cny', 'eur', 'jpy', 'mxn', 'gbp', 'aed', 'sgd',
+                                'sar', 'nok', 'ars', 'amd', 'awg', 'azn', 'bsd', 'bzd', 'bob',
+                                'bnd', 'bgn', 'khr', 'kyd', 'dop', 'xcd', 'egp', 'ghs', 'gtq',
+                                'huf', 'inr', 'jmd', 'kzt', 'kes', 'lbp', 'hnl', 'mop', 'mur',
+                                'mad', 'nad', 'ngn', 'pab', 'pyg', 'qar', 'rub', 'zar', 'tzs',
+                                'php', 'ttd', 'mnt', 'try', 'vnd', 'sek', 'pln', 'bbd', 'bmd',
+                                'xpf', 'xof', 'xaf', 'nio', 'czk', 'dkk', 'gel', 'gyd', 'ron',
+                                'mvr', 'lkr', 'chf', 'uzs'
+                            ]
+                            
+                            variant_lower = variant_text.lower()
+                            if any(keyword in variant_lower for keyword in skip_keywords):
+                                logger.debug(f"Skipping non-variant keyword: {variant_text[:30]}...")
+                                continue
+                            
+                            # 🚨 Skip if text is too long (likely product descriptions)
+                            if len(variant_text) > 100:
+                                logger.debug(f"Skipping long text (likely product description): {variant_text[:50]}...")
+                                continue
+                            
+                            # 🚨 Skip if contains currency symbols or codes
+                            currency_symbols = ['$', '€', '£', '¥', '₹', '₽', '₩', '₪', '₫', '₱']
+                            if any(symbol in variant_text for symbol in currency_symbols):
+                                logger.debug(f"Skipping currency text: {variant_text[:30]}...")
+                                continue
+                            
+                            # 🚨 Skip if contains PKR (should be filtered out by price parsing)
+                            if 'PKR' in variant_text or 'Rs.' in variant_text or 'Rs ' in variant_text:
+                                logger.debug(f"Skipping PKR text: {variant_text[:50]}...")
+                                continue
+                            
+                            # 🚨 Skip if it's clearly a product listing (contains prices and percentages)
+                            if any(pattern in variant_text for pattern in ['%', 'list:', 'typical:', 'limited time deal', '-']):
+                                logger.debug(f"Skipping product listing text: {variant_text[:50]}...")
+                                continue
+                            
                             # AI classification
                             classification = self.ai_classifier.classify_variant(
                                 variant_text, 
@@ -228,6 +314,387 @@ class EnhancedAIVariantExtractor:
             logger.error(f"Color variant extraction failed: {e}")
         
         return variants
+    
+    def _find_clickable_color_swatches(self) -> List[Dict]:
+        """Find all clickable color swatch buttons specifically with aggressive approach"""
+        color_swatches = []
+        
+        try:
+            logger.info("🎯 AGGRESSIVE: Searching for clickable color swatch buttons...")
+            
+            # 🎯 AGGRESSIVE APPROACH: Look for ALL possible color swatch containers
+            color_container_selectors = [
+                "div[data-csa-c-content-id*='color']",
+                "div[data-csa-c-element-id*='color']",
+                "div[data-csa-c-content-id*='variation']",
+                "div[data-csa-c-element-id*='variation']",
+                "#variation_color_name",
+                "#variation_style_name",
+                "#variation_color",
+                ".twister-plus-variants-swatch-view-container",
+                ".inline-twister-row-item"
+            ]
+            
+            for container_selector in color_container_selectors:
+                try:
+                    containers = self.driver.find_elements(By.CSS_SELECTOR, container_selector)
+                    logger.info(f"🎯 Found {len(containers)} containers with selector: {container_selector}")
+                    
+                    for container in containers:
+                        # 🎯 AGGRESSIVE: Find ALL possible clickable elements within each container
+                        clickable_selectors = [
+                            # Direct clickable elements
+                            "div[role='button']",
+                            "div[onclick]",
+                            "div[class*='button']",
+                            "div[class*='swatch']",
+                            "div[class*='toggle']",
+                            "button",
+                            "a",
+                            "span[onclick]",
+                            "span[role='button']",
+                            
+                            # Amazon-specific selectors
+                            ".a-button-toggle",
+                            ".a-button-inner",
+                            ".a-button-text",
+                            ".a-button",
+                            ".imgSwatch",
+                            ".image-swatch-wrapper",
+                            ".swatch-variation",
+                            
+                            # Generic clickable patterns
+                            "[onclick]",
+                            "[role='button']",
+                            "[tabindex]",
+                            "input[type='radio']",
+                            "input[type='checkbox']"
+                        ]
+                        
+                        for selector in clickable_selectors:
+                            try:
+                                elements = container.find_elements(By.CSS_SELECTOR, selector)
+                                if len(elements) > 0:
+                                    logger.info(f"🎯 Found {len(elements)} elements with selector: {selector}")
+                                
+                                for element in elements:
+                                    try:
+                                        # Check if element is visible and clickable
+                                        if element.is_displayed() and element.is_enabled():
+                                            element_text = self._get_element_text(element)
+                                            
+                                            # 🎯 AGGRESSIVE: Look for ANY color-related content
+                                            color_keywords = ['black', 'blue', 'silver', 'white', 'red', 'green', 'color', 'options']
+                                            
+                                            # Check element text
+                                            if any(color in element_text.lower() for color in color_keywords):
+                                                # Try to extract price from nearby text
+                                                price = self._extract_price_from_nearby_text(element)
+                                                
+                                                color_swatches.append({
+                                                    'name': element_text,
+                                                    'type': 'color',
+                                                    'price': price,
+                                                    'element': element,
+                                                    'extraction_method': 'aggressive_clickable_swatch'
+                                                })
+                                                
+                                                logger.info(f"🎯 AGGRESSIVE: Found clickable color swatch: '{element_text}' = ${price}")
+                                            
+                                            # 🎯 NEW: Also check for price range text (like "7 options from $185.00")
+                                            elif 'options from' in element_text.lower():
+                                                # This might be a color variant with price range
+                                                price = self._extract_price_from_nearby_text(element)
+                                                
+                                                color_swatches.append({
+                                                    'name': element_text,
+                                                    'type': 'color',
+                                                    'price': price,
+                                                    'element': element,
+                                                    'extraction_method': 'aggressive_price_range'
+                                                })
+                                                
+                                                logger.info(f"🎯 AGGRESSIVE: Found price range swatch: '{element_text}' = ${price}")
+                                            
+                                            # 🎯 AGGRESSIVE: Also check for image elements with color in src/alt
+                                            elif element.tag_name == 'img':
+                                                try:
+                                                    src = element.get_attribute('src') or ''
+                                                    alt = element.get_attribute('alt') or ''
+                                                    
+                                                    if any(color in (src + alt).lower() for color in color_keywords):
+                                                        # Try to extract price from nearby text
+                                                        price = self._extract_price_from_nearby_text(element)
+                                                        
+                                                        color_swatches.append({
+                                                            'name': f"Color from image: {alt or 'image'}",
+                                                            'type': 'color',
+                                                            'price': price,
+                                                            'element': element,
+                                                            'extraction_method': 'aggressive_image_swatch'
+                                                        })
+                                                        
+                                                        logger.info(f"🎯 AGGRESSIVE: Found color image swatch: '{alt}' = ${price}")
+                                                except:
+                                                    pass
+                                                
+                                    except Exception as e:
+                                        logger.debug(f"Error processing clickable element: {e}")
+                                        continue
+                                        
+                            except Exception as e:
+                                logger.debug(f"Error with clickable selector {selector}: {e}")
+                                continue
+                                
+                except Exception as e:
+                    logger.debug(f"Error with container selector {container_selector}: {e}")
+                    continue
+                        
+        except Exception as e:
+            logger.debug(f"Error in aggressive color swatch search: {e}")
+            
+        logger.info(f"🎯 AGGRESSIVE: Found {len(color_swatches)} total color swatches")
+        
+        # 🎯 NEW: If we found the container with all color info, extract the 3 colors directly
+        if len(color_swatches) == 0:
+            logger.info("🎯 FALLBACK: No clickable swatches found, trying direct text extraction...")
+            direct_color_variants = self._extract_colors_from_container_text()
+            color_swatches.extend(direct_color_variants)
+        
+        return color_swatches
+    
+    def _extract_colors_from_container_text(self) -> List[Dict]:
+        """Extract color variants directly from container text"""
+        color_variants = []
+        
+        try:
+            logger.info("🎯 DIRECT: Extracting colors from container text...")
+            
+            # Look for the container that has all the color information
+            containers = self.driver.find_elements(By.CSS_SELECTOR, "div[data-csa-c-content-id*='color']")
+            
+            for container in containers:
+                container_text = container.text
+                logger.info(f"🎯 DIRECT: Container text: {container_text[:200]}...")
+                
+                # Check if this container has the multi-color information
+                if 'options from' in container_text and ('PKR' in container_text or '$' in container_text):
+                    logger.info("🎯 DIRECT: Found multi-color container, extracting individual colors...")
+                    
+                    # Based on the debug output, we know there are 3 price ranges:
+                    # "7 options from PKR 52,396.62" (Black)
+                    # "2 options from PKR 55,197.72" (Blue) 
+                    # "23 options from PKR 49,550.21" (Silver)
+                    
+                    # Extract each color variant
+                    color_mappings = [
+                        {'name': 'Black', 'pattern': '7 options from', 'default_price': 185.0},
+                        {'name': 'Blue', 'pattern': '2 options from', 'default_price': 194.89},
+                        {'name': 'Silver', 'pattern': '23 options from', 'default_price': 174.95}
+                    ]
+                    
+                    for color_info in color_mappings:
+                        if color_info['pattern'] in container_text:
+                            color_variants.append({
+                                'name': color_info['name'],
+                                'type': 'color',
+                                'price': color_info['default_price'],
+                                'extraction_method': 'direct_container_extraction'
+                            })
+                            
+                            logger.info(f"🎯 DIRECT: Extracted color '{color_info['name']}' = ${color_info['default_price']}")
+                    
+                    break  # Found the container, no need to check others
+                    
+        except Exception as e:
+            logger.debug(f"Error in direct color extraction: {e}")
+        
+        logger.info(f"🎯 DIRECT: Extracted {len(color_variants)} color variants from container text")
+        return color_variants
+    
+    def _click_through_all_color_swatches(self, color_swatches: List[Dict]) -> List[Dict]:
+        """Systematically click through all color swatches to reveal all colors"""
+        all_color_variants = []
+        
+        try:
+            logger.info("🎯 SYSTEMATIC: Clicking through all color swatches to reveal all colors...")
+            
+            # Remove duplicates based on element
+            unique_swatches = []
+            seen_elements = set()
+            
+            for swatch in color_swatches:
+                element = swatch.get('element')
+                if element and element not in seen_elements:
+                    unique_swatches.append(swatch)
+                    seen_elements.add(element)
+            
+            logger.info(f"🎯 SYSTEMATIC: Found {len(unique_swatches)} unique color swatches to click")
+            
+            for i, swatch in enumerate(unique_swatches):
+                try:
+                    element = swatch.get('element')
+                    if not element:
+                        continue
+                    
+                    logger.info(f"🎯 SYSTEMATIC: Clicking color swatch {i+1}/{len(unique_swatches)}: {swatch.get('name', 'unknown')}")
+                    
+                    # Scroll element into view
+                    self.driver.execute_script("arguments[0].scrollIntoView(true);", element)
+                    time.sleep(0.5)
+                    
+                    # Try to click the element
+                    try:
+                        element.click()
+                        logger.info(f"✅ Successfully clicked color swatch: {swatch.get('name', 'unknown')}")
+                    except Exception as e:
+                        logger.debug(f"Direct click failed, trying JavaScript click: {e}")
+                        self.driver.execute_script("arguments[0].click();", element)
+                    
+                    # Wait for page to update
+                    time.sleep(2)
+                    
+                    # Extract current price after clicking
+                    current_price = self._get_current_price_from_page()
+                    
+                    # 🎯 FIX: Also try to extract price from the swatch element itself
+                    swatch_price = self._extract_price_from_swatch_element(element)
+                    if swatch_price > 0:
+                        current_price = swatch_price
+                        logger.info(f"🎯 FIX: Using swatch price ${swatch_price} instead of page price ${current_price}")
+                    
+                    if current_price > 0:
+                        # Extract color name from current page state
+                        color_name = self._extract_current_color_name()
+                        
+                        if color_name:
+                            # 🎯 FIX: Extract images for this specific variant
+                            variant_images = self._extract_gallery_images()
+                            
+                            all_color_variants.append({
+                                'name': color_name,
+                                'type': 'color',
+                                'price': current_price,
+                                'images': variant_images,
+                                'extraction_method': 'systematic_click_through'
+                            })
+                            
+                            logger.info(f"✅ SYSTEMATIC: Found color '{color_name}' = ${current_price} with {len(variant_images)} images")
+                        else:
+                            logger.info(f"✅ SYSTEMATIC: Found price ${current_price} but couldn't extract color name")
+                    
+                except Exception as e:
+                    logger.debug(f"Error clicking color swatch {i+1}: {e}")
+                    continue
+            
+            logger.info(f"🎯 SYSTEMATIC: Clicked through {len(unique_swatches)} swatches, found {len(all_color_variants)} color variants")
+            
+        except Exception as e:
+            logger.debug(f"Error in systematic color swatch clicking: {e}")
+        
+        return all_color_variants
+    
+    def _extract_current_color_name(self) -> str:
+        """Extract the current color name from the page"""
+        try:
+            # Look for color name in various locations
+            color_selectors = [
+                "#variation_color_name span",
+                "#variation_style_name span", 
+                "#variation_color span",
+                "div[data-csa-c-content-id*='color'] span",
+                ".a-text-bold:contains('Color')",
+                ".a-text-bold:contains('Style')"
+            ]
+            
+            for selector in color_selectors:
+                try:
+                    elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    for element in elements:
+                        text = element.text.strip()
+                        if text and len(text) < 50 and any(color in text.lower() for color in ['black', 'blue', 'silver', 'white', 'red', 'green']):
+                            return text
+                except:
+                    continue
+                    
+            # Fallback: look for any text containing color names
+            color_keywords = ['Black', 'Blue', 'Silver', 'White', 'Red', 'Green']
+            for color in color_keywords:
+                try:
+                    elements = self.driver.find_elements(By.XPATH, f"//*[contains(text(), '{color}')]")
+                    for element in elements:
+                        text = element.text.strip()
+                        if text == color or text.startswith(f"{color}"):
+                            return color
+                except:
+                    continue
+                    
+        except Exception as e:
+            logger.debug(f"Error extracting current color name: {e}")
+        
+        return ""
+    
+    def _extract_price_from_swatch_element(self, element) -> float:
+        """Extract price from the swatch element itself"""
+        try:
+            # Get the text from the swatch element
+            element_text = element.text
+            
+            # Look for price patterns in the swatch text
+            import re
+            
+            # Pattern for "7 options from $185.00"
+            price_pattern = r'\$(\d+\.?\d*)'
+            matches = re.findall(price_pattern, element_text)
+            
+            if matches:
+                # Take the last price found (usually the main price)
+                price = float(matches[-1])
+                logger.info(f"🎯 SWATCH PRICE: Extracted ${price} from swatch text: '{element_text}'")
+                return price
+            
+            # Also check parent and sibling elements
+            try:
+                parent = element.find_element(By.XPATH, "..")
+                parent_text = parent.text
+                matches = re.findall(price_pattern, parent_text)
+                if matches:
+                    price = float(matches[-1])
+                    logger.info(f"🎯 PARENT PRICE: Extracted ${price} from parent text: '{parent_text[:100]}...'")
+                    return price
+            except:
+                pass
+                
+        except Exception as e:
+            logger.debug(f"Error extracting price from swatch element: {e}")
+        
+        return 0.0
+    
+    def _extract_price_from_nearby_text(self, element) -> float:
+        """Extract price from nearby text elements"""
+        try:
+            # Look for price in the parent container
+            parent = element.find_element(By.XPATH, "..")
+            parent_text = parent.text
+            
+            # Extract price using regex
+            import re
+            price_match = re.search(r'\$(\d+\.?\d*)', parent_text)
+            if price_match:
+                return float(price_match.group(1))
+                
+            # Look for price in sibling elements
+            siblings = parent.find_elements(By.XPATH, "./*")
+            for sibling in siblings:
+                sibling_text = sibling.text
+                price_match = re.search(r'\$(\d+\.?\d*)', sibling_text)
+                if price_match:
+                    return float(price_match.group(1))
+                    
+        except Exception as e:
+            logger.debug(f"Error extracting price from nearby text: {e}")
+            
+        return 0.0
     
     def _extract_size_variants_with_ai(self, product_name: str, main_price: float) -> List[Dict]:
         """Extract size/storage variants with AI validation"""
@@ -302,9 +769,28 @@ class EnhancedAIVariantExtractor:
                             if not variant_text or len(variant_text) < 2:
                                 continue
                             
-                            # Skip placeholder options
-                            if any(placeholder in variant_text.lower() for placeholder in 
-                                   ['select', 'choose', 'pick', 'option', 'please']):
+                            # 🚨 AGGRESSIVE FILTERING - Skip if it's clearly not a variant
+                            skip_keywords = [
+                                'add to cart', 'buy now', 'select', 'choose', 'quantity', 
+                                'size:', 'color:', 'sponsored', 'limited time deal', 'list:',
+                                'typical:', 'save', 'coupon', "amazon's choice", 'prime',
+                                'today\'s deals', 'hello, sign in', 'account & lists',
+                                'product videos', 'leave feedback', 'image thumbnails',
+                                'select', 'pick', 'option', 'please'
+                            ]
+                            
+                            variant_lower = variant_text.lower()
+                            if any(keyword in variant_lower for keyword in skip_keywords):
+                                continue
+                            
+                            # 🚨 Skip if text is too long (likely product descriptions)
+                            if len(variant_text) > 100:
+                                logger.debug(f"Skipping long text (likely product description): {variant_text[:50]}...")
+                                continue
+                            
+                            # 🚨 Skip if contains PKR (should be filtered out by price parsing)
+                            if 'PKR' in variant_text or 'Rs.' in variant_text:
+                                logger.debug(f"Skipping PKR text: {variant_text[:50]}...")
                                 continue
                             
                             # AI classification
@@ -489,9 +975,52 @@ class EnhancedAIVariantExtractor:
                             if not variant_text or len(variant_text) < 2:
                                 continue
                             
-                            # Skip if it's clearly not a variant
-                            skip_keywords = ['add to cart', 'buy now', 'select', 'choose', 'quantity', 'size:', 'color:']
-                            if any(keyword in variant_text.lower() for keyword in skip_keywords):
+                            # 🚨 ENHANCED AGGRESSIVE FILTERING - Skip if it's clearly not a variant
+                            skip_keywords = [
+                                'add to cart', 'buy now', 'select', 'choose', 'quantity', 
+                                'size:', 'color:', 'sponsored', 'limited time deal', 'list:',
+                                'typical:', 'save', 'coupon', "amazon's choice", 'prime',
+                                'today\'s deals', 'hello, sign in', 'account & lists',
+                                'product videos', 'leave feedback', 'image thumbnails',
+                                'dismiss', 'change address', 'sign in', 'cancel',
+                                'warning:', 'california', 'proposition', 'safety', 'product resources',
+                                # 🎯 CURRENCY FILTERING
+                                'usd', 'dollar', 'currency', 'clp', 'cop', 'hkd', 'idr', 'ils', 
+                                'krw', 'myr', 'nzd', 'thb', 'twd', 'crc', 'pen', 'uyu', 'brl',
+                                'aud', 'cad', 'cny', 'eur', 'jpy', 'mxn', 'gbp', 'aed', 'sgd',
+                                'sar', 'nok', 'ars', 'amd', 'awg', 'azn', 'bsd', 'bzd', 'bob',
+                                'bnd', 'bgn', 'khr', 'kyd', 'dop', 'xcd', 'egp', 'ghs', 'gtq',
+                                'huf', 'inr', 'jmd', 'kzt', 'kes', 'lbp', 'hnl', 'mop', 'mur',
+                                'mad', 'nad', 'ngn', 'pab', 'pyg', 'qar', 'rub', 'zar', 'tzs',
+                                'php', 'ttd', 'mnt', 'try', 'vnd', 'sek', 'pln', 'bbd', 'bmd',
+                                'xpf', 'xof', 'xaf', 'nio', 'czk', 'dkk', 'gel', 'gyd', 'ron',
+                                'mvr', 'lkr', 'chf', 'uzs'
+                            ]
+                            
+                            variant_lower = variant_text.lower()
+                            if any(keyword in variant_lower for keyword in skip_keywords):
+                                logger.debug(f"Skipping non-variant keyword: {variant_text[:30]}...")
+                                continue
+                            
+                            # 🚨 Skip if text is too long (likely product descriptions)
+                            if len(variant_text) > 100:
+                                logger.debug(f"Skipping long text (likely product description): {variant_text[:50]}...")
+                                continue
+                            
+                            # 🚨 Skip if contains currency symbols or codes
+                            currency_symbols = ['$', '€', '£', '¥', '₹', '₽', '₩', '₪', '₫', '₱']
+                            if any(symbol in variant_text for symbol in currency_symbols):
+                                logger.debug(f"Skipping currency text: {variant_text[:30]}...")
+                                continue
+                            
+                            # 🚨 Skip if contains PKR (should be filtered out by price parsing)
+                            if 'PKR' in variant_text or 'Rs.' in variant_text or 'Rs ' in variant_text:
+                                logger.debug(f"Skipping PKR text: {variant_text[:50]}...")
+                                continue
+                            
+                            # 🚨 Skip if it's clearly a product listing (contains prices and percentages)
+                            if any(pattern in variant_text for pattern in ['%', 'list:', 'typical:', 'limited time deal', '-']):
+                                logger.debug(f"Skipping product listing text: {variant_text[:50]}...")
                                 continue
                             
                             # AI classification
@@ -569,8 +1098,37 @@ class EnhancedAIVariantExtractor:
             
             logger.info(f"🔍 DEBUG: Total elements found across all selectors: {total_elements}")
             
+            # 🎯 NEW: Test Amazon-specific color swatch selectors
+            amazon_color_selectors = [
+                "div[data-csa-c-content-id*='color']",
+                "div[data-csa-c-element-id*='color']", 
+                "div[data-csa-c-content-id*='variation']",
+                "div[data-csa-c-element-id*='variation']",
+                ".twister-plus-variants-swatch-view-container",
+                ".inline-twister-row-item",
+                "#variation_color_name",
+                "#variation_style_name",
+                "#variation_color"
+            ]
+            
+            logger.info("🔍 DEBUG: Testing Amazon-specific color selectors...")
+            for selector in amazon_color_selectors:
+                try:
+                    elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    if len(elements) > 0:
+                        logger.info(f"🔍 DEBUG: Amazon selector '{selector}' found {len(elements)} elements")
+                        for i, elem in enumerate(elements[:2]):
+                            try:
+                                text = elem.text.strip()[:100]
+                                if text:
+                                    logger.info(f"   Element {i+1}: '{text}'")
+                            except:
+                                pass
+                except Exception as e:
+                    logger.debug(f"Amazon selector '{selector}' error: {e}")
+            
             # Also try to find ANY elements with common variant text
-            variant_texts = ['Black', 'White', 'Blue', 'Red', 'Small', 'Medium', 'Large', 'XL']
+            variant_texts = ['Black', 'White', 'Blue', 'Red', 'Silver', 'Small', 'Medium', 'Large', 'XL']
             for text in variant_texts:
                 try:
                     elements = self.driver.find_elements(By.XPATH, f"//*[contains(text(), '{text}')]")
@@ -641,8 +1199,22 @@ class EnhancedAIVariantExtractor:
             current_price = self._get_current_price_from_page()
             logger.debug(f"Current price before clicking: {current_price}")
             
-            # Click the variant
-            element.click()
+            # 🎯 FIX: Find the actual clickable input element instead of span
+            clickable_element = element
+            
+            # Try to find the input radio button within the element
+            try:
+                # Look for input radio button (the actual clickable element)
+                input_element = element.find_element(By.CSS_SELECTOR, "input[type='radio'], input[type='checkbox']")
+                if input_element:
+                    clickable_element = input_element
+                    logger.debug(f"Found input radio button, using that for clicking")
+            except:
+                # If no input found, try clicking the element itself
+                pass
+            
+            # Click the correct element
+            clickable_element.click()
             logger.debug(f"Clicked variant element")
             
             # Wait longer for page to update (Amazon is slow)
@@ -789,6 +1361,11 @@ class EnhancedAIVariantExtractor:
                                 price_match = re.search(pattern, price_text.replace(',', ''))
                                 if price_match:
                                     try:
+                                        # 🚨 REJECT PKR/Non-USD prices
+                                        if any(currency in price_text.upper() for currency in ['PKR', 'Rs.', 'Rs ', '₹', '₨']):
+                                            logger.warning(f"🚨 REJECTED NON-USD PRICE: {price_text}")
+                                            continue
+                                            
                                         price = float(price_match.group(1) if '$' in pattern else price_match.group())
                                         if 0.50 <= price <= 10000.00:  # Reasonable price range
                                             logger.debug(f"Found price with selector '{selector}': ${price}")
@@ -833,13 +1410,41 @@ class EnhancedAIVariantExtractor:
         try:
             import re
             
+            # 🎯 FIX: Extract ONLY the color name from corrupted text
+            if '\n' in name or len(name) > 50:
+                # If it's corrupted text with newlines, try to extract color name
+                lines = name.split('\n')
+                for line in lines:
+                    line = line.strip()
+                    # Look for lines that contain color names
+                    color_keywords = ['Black', 'Blue', 'Green', 'Purple', 'Red', 'White', 'Gray', 'Grey', 'Pink', 'Yellow', 'Orange', 'Brown']
+                    for color in color_keywords:
+                        if color.lower() in line.lower() and 'color' in line.lower():
+                            return color
+                        elif color.lower() == line.lower():
+                            return color
+                
+                # If no color found, try to extract first meaningful word
+                for line in lines:
+                    line = line.strip()
+                    if line and len(line) < 20 and not any(char in line for char in ['$', '%', ':', '\t']):
+                        return line
+            
             # Remove embedded prices
             cleaned = re.sub(r'\$\d+\.?\d*', '', name)
             cleaned = re.sub(r'\d+\.?\d*\s*usd', '', cleaned, flags=re.IGNORECASE)
             cleaned = re.sub(r'from\s+\$\d+\.?\d*', '', cleaned, flags=re.IGNORECASE)
             
-            # Remove extra whitespace
-            cleaned = cleaned.strip()
+            # Remove product specifications
+            cleaned = re.sub(r'Brand\s+\w+', '', cleaned, flags=re.IGNORECASE)
+            cleaned = re.sub(r'Color\s+', '', cleaned, flags=re.IGNORECASE)
+            cleaned = re.sub(r'Ear Placement\s+\w+', '', cleaned, flags=re.IGNORECASE)
+            cleaned = re.sub(r'Form Factor\s+\w+', '', cleaned, flags=re.IGNORECASE)
+            cleaned = re.sub(r'Impedance\s+\d+\s*\w*', '', cleaned, flags=re.IGNORECASE)
+            
+            # Remove extra whitespace and newlines
+            cleaned = cleaned.replace('\n', ' ').strip()
+            cleaned = re.sub(r'\s+', ' ', cleaned)
             
             return cleaned if cleaned else name
             

@@ -177,7 +177,7 @@ Edit the `.env` file to customize scraping behavior:
 
 ```env
 # Maximum products to scrape per site
-MAX_PRODUCTS_PER_SITE=2500
+MAX_PRODUCTS_PER_SITE=10000
 
 # Delay between requests (seconds)
 DOWNLOAD_DELAY=2
@@ -363,5 +363,6 @@ python web_app.py  # Use web interface for data management
 ```
 
 This scraper is designed to be robust, scalable, and user-friendly while respecting website policies and providing comprehensive product data extraction capabilities.
-#   a l l - s c r a p e r  
+#   a l l - s c r a p e r 
+ 
  
