@@ -211,6 +211,9 @@ class DatabaseManager:
             if 'hr' in delivery_time:
                 delivery_time = delivery_time.split()[0]
             
+            # CRITICAL FIX: Detect variation_type from scraped data
+            variation_type = self._detect_variation_type(product)
+            
             values = (
                 product.get('product_name', '')[:255],  # name
                 slug,  # slug
@@ -245,7 +248,7 @@ class DatabaseManager:
                 product.get('rating', 0),  # product_reviews_sum
                 '0',  # is_featured
                 0,  # views_count
-                'SINGLE',  # variation_type
+                variation_type,  # variation_type - FIXED!
                 None  # h1
             )
             
@@ -259,6 +262,89 @@ class DatabaseManager:
             logger.error(f"Error inserting main product: {e}")
             logger.error(f"Product data: {product}")
             return None
+    
+    def _detect_variation_type(self, product):
+        """Detect variation type from scraped product data.
+        
+        ENHANCED LOGIC:
+        - 'SINGLE': Products with no variants OR variants of only one type (e.g., only colors)
+        - 'MULTIPLE': Products with variants of multiple types (e.g., colors AND sizes)
+        
+        Args:
+            product: Product data dictionary from scraper
+            
+        Returns:
+            'SINGLE' or 'MULTIPLE' based on actual variant analysis
+        """
+        try:
+            variants = product.get('variants', [])
+            
+            if not variants:
+                logger.debug("No variants found, setting to SINGLE")
+                return 'SINGLE'
+            
+            # Group variants by type to detect multi-attribute products
+            variant_types = set()
+            for variant in variants:
+                variant_type = variant.get('type', 'unknown')
+                variant_types.add(variant_type)
+            
+            # If more than one variant type, it's multi-attribute
+            if len(variant_types) > 1:
+                logger.debug(f"Multi-attribute product detected with {len(variant_types)} types: {list(variant_types)}")
+                return 'MULTIPLE'
+            else:
+                logger.debug(f"Single-attribute product detected with type: {list(variant_types)}")
+                return 'SINGLE'
+                    
+        except Exception as e:
+            logger.error(f"Error detecting variation type: {e}")
+            return 'SINGLE'  # Default fallback
+    
+    def _validate_combination_format(self, combination):
+        """Validate that combination matches expected database format.
+        
+        Expected formats:
+        - Text format: "Green / Medium", "Red / 8GB"
+        - Simple format: "single_combination", "default_combination"
+        
+        Args:
+            combination: Generated combination string
+            
+        Returns:
+            bool: True if format is valid
+        """
+        try:
+            if not combination or not isinstance(combination, str):
+                return False
+            
+            # Allow simple formats
+            simple_formats = ['single_combination', 'default_combination']
+            if combination in simple_formats:
+                return True
+            
+            # Check text format: should contain " / " separator and no IDs
+            if ' / ' in combination:
+                parts = combination.split(' / ')
+                # Each part should be text, not numbers or ID format
+                for part in parts:
+                    part = part.strip()
+                    if not part:
+                        return False
+                    # Reject ID-based formats like "1:4"
+                    if ':' in part or part.isdigit():
+                        return False
+                return True
+            
+            # Single word attributes (like colors) are also valid
+            if len(combination.split()) <= 3 and ':' not in combination and '|' not in combination:
+                return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error validating combination format: {e}")
+            return False
     
     def _insert_product_attributes(self, cursor, product_id, product):
         """Insert product attributes derived from product-level fields and variants.
@@ -382,86 +468,244 @@ class DatabaseManager:
                         self._insert_variant_image(cursor, variation_id, main_images[0], product)
                 
             else:
-                # Insert each variant
-                additional_images = product.get('additional_images', [])
-                for i, variant in enumerate(variants):
-                    # Clean variant name - remove prices and newlines
-                    clean_variant_name = self._clean_variant_name(variant.get('name', ''))
-                    
-                    # Build combination string using ID-based format parentId:childId|parentId:childId
-                    combination = self._build_variant_combination(cursor, variant, product, product_id, clean_variant_name)
+                # NEW: Enhanced logic for single vs multi-attribute products
+                variants = product.get('variants', [])
+                variation_type = self._detect_variation_type(product)
+                
+                # Group variants by type to detect multi-attribute products
+                variant_groups = {}
+                for variant in variants:
+                    variant_type = variant.get('type', 'unknown')
+                    if variant_type not in variant_groups:
+                        variant_groups[variant_type] = []
+                    variant_groups[variant_type].append(variant)
+                
+                logger.info(f"Product has {len(variant_groups)} variant types: {list(variant_groups.keys())}")
+                
+                # Check if this is truly a multi-attribute product
+                is_multi_attribute = len(variant_groups) > 1
+                
+                if is_multi_attribute:
+                    logger.info(f"Processing multi-attribute product with {len(variant_groups)} attribute types")
+                    self._insert_multi_attribute_variations(cursor, product_id, product, variant_groups)
+                else:
+                    logger.info(f"Processing single-attribute product")
+                    self._insert_single_attribute_variations(cursor, product_id, product, variants)
 
-                    insert_query = """
-                    INSERT INTO product_variations (
-                        product_id, sku, purchase_price, unit_price, current_stock,
-                        created_by, updated_by, created_at, updated_at, discount,
-                        discount_type, combination, stock_status
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """
-                    # CRITICAL FIX: Force integer conversion for stock values
-                    variant_stock = variant.get('stock', 0)
-                    try:
-                        variant_stock = int(variant_stock) if variant_stock else 0
-                    except (ValueError, TypeError):
-                        logger.warning(f"Invalid stock value '{variant_stock}' for variant, defaulting to 0")
-                        variant_stock = 0
                     
-                    # CRITICAL FIX: Force float conversion for prices
+        except Exception as e:
+            logger.error(f"Error inserting product variations: {e}")
+    
+    def _insert_single_attribute_variations(self, cursor, product_id, product, variants):
+        """Insert variations for single-attribute products (e.g., only colors OR only sizes)"""
+        try:
+            additional_images = product.get('additional_images', [])
+            
+            for i, variant in enumerate(variants):
+                # Clean variant name - remove prices and newlines
+                clean_variant_name = self._clean_variant_name(variant.get('name', ''))
+                
+                # Build combination string using text format
+                combination = self._build_single_variant_combination(cursor, variant, product, product_id, clean_variant_name)
+
+                insert_query = """
+                INSERT INTO product_variations (
+                    product_id, sku, purchase_price, unit_price, current_stock,
+                    created_by, updated_by, created_at, updated_at, discount,
+                    discount_type, combination, stock_status
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """
+                
+                # CRITICAL FIX: Force integer conversion for stock values
+                variant_stock = variant.get('stock', 0)
+                try:
+                    variant_stock = int(variant_stock) if variant_stock else 0
+                except (ValueError, TypeError):
+                    logger.warning(f"Invalid stock value '{variant_stock}' for variant, defaulting to 0")
+                    variant_stock = 0
+                
+                # CRITICAL FIX: Force float conversion for prices
+                variant_price = variant.get('price', 0)
+                try:
+                    variant_price = float(variant_price) if variant_price else 0.0
+                except (ValueError, TypeError):
+                    logger.warning(f"Invalid price value '{variant_price}' for variant, defaulting to 0.0")
+                    variant_price = 0.0
+                
+                purchase_price = product.get('purchase_price', 0)
+                try:
+                    purchase_price = float(purchase_price) if purchase_price else 0.0
+                except (ValueError, TypeError):
+                    purchase_price = 0.0
+                
+                values = (
+                    product_id,
+                    variant.get('sku', ''),
+                    purchase_price,  # Use main product purchase price
+                    variant_price,
+                    variant_stock,
+                    '1',  # created_by
+                    '1',  # updated_by
+                    datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    product.get('discount', 0),
+                    '14',  # discount_type (ID 14 = Percentage)
+                    combination or 'default_combination',
+                    '11'  # stock_status (ID 11 = Stock In)
+                )
+                cursor.execute(insert_query, values)
+                variation_id = cursor.lastrowid
+                logger.info(f"Inserted single-attribute variation with ID: {variation_id}, combination: {combination}")
+                
+                # Insert variant-specific images
+                variant_images = variant.get('images', [])
+                all_variant_images = []
+                
+                # Add variant-specific images
+                if variant_images:
+                    all_variant_images.extend(variant_images)
+                
+                # Add additional_images to FIRST variant only
+                if i == 0 and additional_images:
+                    logger.info(f"Adding {len(additional_images)} additional_images to first variant")
+                    all_variant_images.extend(additional_images)
+                
+                # Insert all collected images for this variant
+                if all_variant_images:
+                    self._insert_variant_images(cursor, variation_id, all_variant_images, product)
+                    logger.info(f"Inserted {len(all_variant_images)} images for variant ID: {variation_id}")
+                else:
+                    # If variant has no images, use main product image as fallback
+                    main_images = product.get('product_images', [])
+                    if main_images and main_images[0]:
+                        logger.info(f"Variant has no images, using main product image as fallback")
+                        self._insert_variant_image(cursor, variation_id, main_images[0], product)
+        
+        except Exception as e:
+            logger.error(f"Error inserting single-attribute variations: {e}")
+    
+    def _insert_multi_attribute_variations(self, cursor, product_id, product, variant_groups):
+        """Insert variations for multi-attribute products (e.g., colors AND sizes)"""
+        try:
+            from itertools import product as itertools_product
+            
+            # Get all combinations across different attribute types
+            attribute_combinations = list(itertools_product(*variant_groups.values()))
+            logger.info(f"Generated {len(attribute_combinations)} combinations for multi-attribute product")
+            
+            additional_images = product.get('additional_images', [])
+            
+            for i, combination in enumerate(attribute_combinations):
+                # Build combination string from multiple variants
+                combination_parts = []
+                combined_price = 0.0
+                combined_stock = 0
+                combined_sku_parts = []
+                variant_images = []
+                
+                for variant in combination:
+                    clean_name = self._clean_variant_name(variant.get('name', ''))
+                    combination_parts.append(clean_name)
+                    
+                    # Combine prices (use highest price for the combination)
                     variant_price = variant.get('price', 0)
                     try:
                         variant_price = float(variant_price) if variant_price else 0.0
+                        combined_price = max(combined_price, variant_price)
                     except (ValueError, TypeError):
-                        logger.warning(f"Invalid price value '{variant_price}' for variant, defaulting to 0.0")
-                        variant_price = 0.0
+                        pass
                     
-                    purchase_price = product.get('purchase_price', 0)
+                    # Combine stock (use minimum stock for the combination - bottleneck approach)
+                    variant_stock = variant.get('stock', 0)
                     try:
-                        purchase_price = float(purchase_price) if purchase_price else 0.0
+                        variant_stock = int(variant_stock) if variant_stock else 0
+                        combined_stock = min(combined_stock, variant_stock) if combined_stock > 0 else variant_stock
                     except (ValueError, TypeError):
-                        purchase_price = 0.0
+                        pass
                     
-                    values = (
-                        product_id,
-                        variant.get('sku', ''),
-                        purchase_price,  # Use main product purchase price
-                        variant_price,
-                        variant_stock,
-                        '1',  # created_by
-                        '1',  # updated_by
-                        datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                        datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                        product.get('discount', 0),
-                        '14',  # discount_type (ID 14 = Percentage)
-                        combination or 'default_combination',
-                        '11'  # stock_status (ID 11 = Stock In)
-                    )
-                    cursor.execute(insert_query, values)
-                    variation_id = cursor.lastrowid
-                    logger.info(f"Inserted variation with ID: {variation_id}, name: {clean_variant_name}")
+                    # Collect SKU parts
+                    if variant.get('sku'):
+                        combined_sku_parts.append(variant.get('sku'))
                     
-                    # Insert variant-specific images
-                    variant_images = variant.get('images', [])
-                    all_variant_images = []
-                    
-                    # Add variant-specific images
-                    if variant_images:
-                        all_variant_images.extend(variant_images)
-                    
-                    # Add additional_images to FIRST variant only
-                    if i == 0 and additional_images:
-                        logger.info(f"Adding {len(additional_images)} additional_images to first variant")
-                        all_variant_images.extend(additional_images)
-                    
-                    # Insert all collected images for this variant
-                    if all_variant_images:
-                        self._insert_variant_images(cursor, variation_id, all_variant_images, product)
-                        logger.info(f"Inserted {len(all_variant_images)} images for variant ID: {variation_id}")
-                    else:
-                        # If variant has no images, use main product image as fallback
-                        main_images = product.get('product_images', [])
-                        if main_images and main_images[0]:
-                            logger.info(f"Variant has no images, using main product image as fallback")
-                            self._insert_variant_image(cursor, variation_id, main_images[0], product)
+                    # Collect images from all variants in combination
+                    if variant.get('images'):
+                        variant_images.extend(variant.get('images'))
+                
+                # Create text-based combination string
+                combination_text = ' / '.join(combination_parts)
+                combined_sku = '-'.join(combined_sku_parts) if combined_sku_parts else ''
+                
+                insert_query = """
+                INSERT INTO product_variations (
+                    product_id, sku, purchase_price, unit_price, current_stock,
+                    created_by, updated_by, created_at, updated_at, discount,
+                    discount_type, combination, stock_status
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """
+                
+                purchase_price = product.get('purchase_price', 0)
+                try:
+                    purchase_price = float(purchase_price) if purchase_price else 0.0
+                except (ValueError, TypeError):
+                    purchase_price = 0.0
+                
+                values = (
+                    product_id,
+                    combined_sku,
+                    purchase_price,
+                    combined_price,
+                    combined_stock,
+                    '1',  # created_by
+                    '1',  # updated_by
+                    datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    product.get('discount', 0),
+                    '14',  # discount_type (ID 14 = Percentage)
+                    combination_text,
+                    '11'  # stock_status (ID 11 = Stock In)
+                )
+                cursor.execute(insert_query, values)
+                variation_id = cursor.lastrowid
+                logger.info(f"Inserted multi-attribute variation with ID: {variation_id}, combination: {combination_text}")
+                
+                # Insert variant-specific images
+                all_variant_images = []
+                
+                # Add images from all variants in this combination
+                if variant_images:
+                    all_variant_images.extend(variant_images)
+                
+                # Add additional_images to FIRST combination only
+                if i == 0 and additional_images:
+                    logger.info(f"Adding {len(additional_images)} additional_images to first combination")
+                    all_variant_images.extend(additional_images)
+                
+                # Insert all collected images for this combination
+                if all_variant_images:
+                    self._insert_variant_images(cursor, variation_id, all_variant_images, product)
+                    logger.info(f"Inserted {len(all_variant_images)} images for combination ID: {variation_id}")
+                else:
+                    # If combination has no images, use main product image as fallback
+                    main_images = product.get('product_images', [])
+                    if main_images and main_images[0]:
+                        logger.info(f"Combination has no images, using main product image as fallback")
+                        self._insert_variant_image(cursor, variation_id, main_images[0], product)
+        
+        except Exception as e:
+            logger.error(f"Error inserting multi-attribute variations: {e}")
+
+    def _build_single_variant_combination(self, cursor, variant, product, product_id, clean_name=None):
+        """Build combination string for single-attribute products"""
+        try:
+            variant_name = variant.get('name') or clean_name
+            if variant_name:
+                # For single-attribute products, just clean and return the variant name
+                return self._clean_variant_name(variant_name)
+            else:
+                return 'default_combination'
+        except Exception as e:
+            logger.error(f"Error building single variant combination: {e}")
+            return 'default_combination'
                     
         except Exception as e:
             logger.error(f"Error inserting product variations: {e}")
@@ -569,11 +813,23 @@ class DatabaseManager:
                 logger.warning(f"No valid attributes found for variant: {variant.get('name', 'Unknown')}")
                 return 'single_combination'
 
-            # Sort by parent_id and format: "parentId:childId|parentId:childId"
-            option_pairs.sort(key=lambda p: p[0])
-            combo = '|'.join([f"{pid}:{cid}" for pid, cid in option_pairs])
-            logger.info(f"Generated combination: {combo} from {len(option_pairs)} attributes (type: {variant_type})")
-            return combo
+            # CRITICAL FIX: Generate text-based combination using database values
+            text_combination = self._convert_ids_to_text_combination(cursor, option_pairs)
+            
+            # Validate combination format
+            if not self._validate_combination_format(text_combination):
+                logger.warning(f"Invalid combination format generated: '{text_combination}', using fallback")
+                text_combination = 'default_combination'
+            
+            # CRITICAL FIX: Ensure product_attributes links exist for THIS specific variant
+            for parent_id, child_id in option_pairs:
+                # Create parent link (shared across all variants)
+                self._ensure_product_attribute_link(cursor, product_id, parent_id, 'parent')
+                # Create child link (specific to this variant)
+                self._ensure_product_attribute_link(cursor, product_id, child_id, 'child')
+            
+            logger.info(f"Generated text combination: '{text_combination}' from {len(option_pairs)} attributes")
+            return text_combination
             
         except Exception as e:
             logger.error(f"Error building variant combination: {e}")
@@ -588,30 +844,65 @@ class DatabaseManager:
             if not variant_name or variant_name.strip() == '':
                 return attributes
             
-            # Common patterns to extract attributes
+            # Common patterns to extract attributes (order matters - most specific first)
             patterns = [
+                # Complex Size patterns: 88x104-25 lbs, 48x72-20 lbs, etc. (COMPLETE size descriptions)
+                (r'(\d+x\d+(?:-\d+)?\s*lbs?)', 'Size'),
+                (r'(\d+\s*Inch\s*x\s*\d+\s*Inch\s*[^\d]*\d+\s*LBS?)', 'Size'),  # "50 Inch x 60 Inch ï½œ10LBS"
+                # Color with "/": Gray/Blue, Black/Silver (before simple colors) - MISSING PATTERN!
+                (r'\b([A-Za-z]+/[A-Za-z]+)\b', 'Color'),
+                # Color with "&": Black & Orange, Navy & Blue (before simple colors)
+                (r'\b([A-Za-z]+\s*&\s*[A-Za-z]+)\b', 'Color'),
+                # Color with "and": Black and Blue, Grey and Black (before simple colors)  
+                (r'\b([A-Za-z]+\s+and\s+[A-Za-z]+)\b', 'Color'),
+                # Color patterns: Red, Blue, Black, etc. (include modifiers like Dark, Light)
+                (r'\b((?:Dark|Light|Bright|Deep|Pale)?\s*(?:Red|Blue|Black|White|Green|Yellow|Pink|Purple|Orange|Brown|Gray|Grey|Silver|Gold))\b', 'Color'),
                 # RAM patterns: 8GB, 16GB, etc.
-                (r'(\d+)\s*GB(?:\s+RAM)?', 'RAM'),
+                (r'(\d+)\s*GB(?:\s+RAM)?', 'Capacity'),
                 # Storage patterns: 288GB Storage, 512GB SSD, etc.
-                (r'(\d+)\s*GB\s+(?:Storage|SSD|storage)', 'Storage'),  
-                # Size patterns: Small, Medium, Large, XL, etc.
+                (r'(\d+)\s*GB\s+(?:Storage|SSD|storage)', 'Capacity'),  
+                # Simple Size patterns: 60x80, 48x72, etc. (only if no complex size found)
+                (r'(\d+x\d+)', 'Size'),
+                # Standard Size patterns: Small, Medium, Large, XL, etc.
                 (r'\b(XS|S|M|L|XL|XXL|XXXL|Small|Medium|Large|Extra Large)\b', 'Size'),
-                # Color patterns: Red, Blue, Black, etc.
-                (r'\b(Red|Blue|Black|White|Green|Yellow|Pink|Purple|Orange|Brown|Gray|Grey|Silver|Gold)\b', 'Color'),
                 # Material patterns
                 (r'\b(Cotton|Leather|Polyester|Silk|Wool|Linen|Denim)\b', 'Material'),
+                # Weight patterns: 25 lbs, 20 lbs, etc. (LAST - only if no size with weight found)
+                (r'(\d+\s*lbs?)', 'Weight'),
             ]
             
-            # Try to extract using patterns
+            # Try to extract using patterns (most specific first, avoid conflicts)
+            found_attributes = set()  # Track which attribute types we've found
+            
             for pattern, attr_name in patterns:
+                # Skip if we already found this attribute type
+                if attr_name in found_attributes:
+                    continue
+                    
                 matches = re.findall(pattern, variant_name, re.IGNORECASE)
                 if matches:
-                    if attr_name in ['RAM', 'Storage']:
-                        # For RAM and Storage, add GB unit
-                        attributes[attr_name] = f"{matches[0]}GB"
+                    if attr_name in ['Capacity'] and any('GB' in str(m) for m in matches):
+                        # For Capacity (RAM/Storage), add GB unit if not present
+                        for match in matches:
+                            if 'GB' not in str(match):
+                                attributes[attr_name] = f"{match}GB"
+                            else:
+                                attributes[attr_name] = str(match)
+                            found_attributes.add(attr_name)
+                            break  # Take first match
                     else:
                         # For other attributes, use as-is
-                        attributes[attr_name] = matches[0]
+                        # If multiple matches, take the first one
+                        match_value = str(matches[0]).strip()
+                        
+                        # Special handling for multi-word colors
+                        if attr_name == 'Color' and ('&' in match_value or 'and' in match_value.lower()):
+                            # Clean up formatting for colors like "Black & Orange"
+                            match_value = re.sub(r'\s*&\s*', ' & ', match_value)
+                            match_value = re.sub(r'\s+and\s+', ' & ', match_value, flags=re.IGNORECASE)
+                        
+                        attributes[attr_name] = match_value
+                        found_attributes.add(attr_name)
             
             # If no patterns matched, try simple comma/pipe separation
             if not attributes:
@@ -707,11 +998,26 @@ class DatabaseManager:
             'materials': 'Material',
             'fabric': 'Material',
             
-            # Storage/Memory variants (map to Size for consistency)
-            'storage': 'Storage',
-            'memory': 'Storage',
-            'capacity': 'Storage',
-            'ram': 'RAM',
+            # Storage/Memory variants - CRITICAL FIX: Map to existing 'Capacity' attribute
+            'storage': 'Capacity',
+            'memory': 'Capacity', 
+            'capacity': 'Capacity',
+            'ram': 'Capacity',
+            
+            # Pack Size variants
+            'pack_size': 'Pack Size',
+            'pack size': 'Pack Size',
+            'packsize': 'Pack Size',
+            
+            # Other existing attributes
+            'flavor': 'Flavor',
+            'flavour': 'Flavor',
+            'warranty': 'Warranty',
+            'power': 'Power',
+            'weight': 'Weight',
+            'dimensions': 'Dimensions',
+            'dimension': 'Dimensions',
+            'brand': 'Brand',
             
             # Generic variant type - will be handled specially
             'variant': 'Variant',
@@ -803,6 +1109,48 @@ class DatabaseManager:
             cursor.execute(insert_sql, (product_id, attribute_id, link_type, now, now))
         except Exception as e:
             logger.error(f"Error ensuring product attribute link: {e}")
+    
+    def _convert_ids_to_text_combination(self, cursor, option_pairs):
+        """Convert (parent_id, child_id) pairs to 'Value1 / Value2' format.
+        
+        Args:
+            cursor: Database cursor
+            option_pairs: List of (parent_id, child_id) tuples
+            
+        Returns:
+            String like "Green / Medium" or "Red / 8GB"
+        """
+        try:
+            text_parts = []
+            
+            # Sort by parent_id for consistent ordering
+            sorted_pairs = sorted(option_pairs, key=lambda x: x[0])
+            
+            for parent_id, child_id in sorted_pairs:
+                # Get child attribute name from database
+                select_sql = "SELECT name FROM attributes WHERE id = %s AND parent_id = %s LIMIT 1"
+                cursor.execute(select_sql, (child_id, parent_id))
+                result = cursor.fetchone()
+                
+                if result:
+                    text_parts.append(result[0])
+                    logger.debug(f"Found attribute value: {result[0]} (id: {child_id})")
+                else:
+                    logger.warning(f"Could not find attribute name for child_id: {child_id}, parent_id: {parent_id}")
+                    # Fallback to ID-based format for this part
+                    text_parts.append(f"attr_{child_id}")
+            
+            if text_parts:
+                combination_text = ' / '.join(text_parts)
+                logger.info(f"Generated text combination: '{combination_text}' from {len(option_pairs)} attributes")
+                return combination_text
+            else:
+                logger.warning("No valid text parts found, using default combination")
+                return 'default_combination'
+                
+        except Exception as e:
+            logger.error(f"Error converting IDs to text combination: {e}")
+            return 'default_combination'
     
     def _insert_variant_images(self, cursor, variation_id, variant_images, product):
         """Insert variant-specific images into images table"""
