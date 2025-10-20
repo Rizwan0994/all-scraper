@@ -395,12 +395,22 @@ class UniversalScraper:
         self.results = []
         self.total_scraped = 0
         self.socketio = socketio
-        self.scraped_products = []
-        self.scraped_urls = set()  # For deduplication
+        
+        # ✅ STREAMING APPROACH: Lightweight tracking instead of storing full products
+        self.scraped_urls = set()  # For deduplication only
+        self.saved_count = 0       # Track saved products count
+        self.site_counts = {}      # Track products per site
+        self.last_product_id = 0   # For Socket.IO product IDs
+        
+        # ✅ MEMORY OPTIMIZATION: Don't store full products in memory
+        # self.scraped_products = []  # REMOVED - causes memory issues
         
         # Initialize chunk manager for efficient data handling
         self.chunk_manager = ChunkManager()
         self.chunk_manager.initialize_from_existing()
+        
+        # ✅ CRITICAL: Load existing products to preserve morning's work
+        self._load_existing_products_for_streaming()
         
         # Initialize perfect variant filter for data cleaning
         self.variant_filter = PerfectVariantFilter()
@@ -411,6 +421,10 @@ class UniversalScraper:
             'current_site': '',
             'current_status': 'Ready'
         }
+        
+        # ✅ BROWSER SESSION MANAGEMENT: Track for rotation
+        self.products_scraped_since_rotation = 0
+        self.max_products_per_session = 50  # Rotate browser every 50 products
         
         # Scraping control
         self.stop_scraping = False
@@ -449,6 +463,10 @@ class UniversalScraper:
         logger.info("Stop scraping requested")
         self.stop_scraping = True
         self.current_stats['current_status'] = 'Stopping...'
+        
+        # ✅ CRITICAL FIX: Re-enable chunk manager when scraping stops
+        self.chunk_manager.set_scraping_active(False)
+        
         if self.socketio:
             self.socketio.emit('scraping_status', {
                 'status': 'stopping',
@@ -2035,7 +2053,8 @@ class UniversalScraper:
         self.random_delay(10, 20)  # Delays between keywords
         
         logger.info(f"Amazon scraping completed: {products_added} products")
-        return self.scraped_products[-products_added:]
+        # ✅ STREAMING: Return empty list since products are saved immediately
+        return []
     
     def _ensure_global_amazon_url(self, url: str) -> str:
         """Ensure Amazon URL uses global domain (amazon.com) with USD prices"""
@@ -2839,7 +2858,8 @@ class UniversalScraper:
             self.random_delay(5, 10)
         
         logger.info(f"eBay scraping completed: {products_added} products")
-        return self.scraped_products[-products_added:]
+        # ✅ STREAMING: Return empty list since products are saved immediately
+        return []
     
     def scrape_all_sites(self, keywords, max_products=200, selected_sites=None):
         """Scrape from all selected sites"""
@@ -2909,26 +2929,50 @@ class UniversalScraper:
         product_key = product.source_url.strip()
         product_name_key = product.product_name.strip().lower()
         
-        # Check URL duplicates ONLY
+        # Check URL duplicates ONLY - CRITICAL: Add to set BEFORE saving
         if product_key in self.scraped_urls:
-            logger.info(f"Duplicate URL skipped: {product.product_name[:50]}...")
+            logger.info(f"🔄 Duplicate URL skipped: {product.product_name[:50]}...")
             return False
+        
+        # Add to scraped_urls BEFORE saving to prevent race conditions
+        self.scraped_urls.add(product_key)
         
         # 🎯 PERFECT EXTRACTION - No AI verification needed!
         logger.info(f"🎯 Product ready to save: {len(product.variants)} variants extracted perfectly!")
         
-        # Add to collections
-        self.scraped_products.append(product)
-        self.scraped_urls.add(product_key)
+        # ✅ STREAMING APPROACH: Save immediately, don't accumulate in memory
+        try:
+            # Save to files immediately using append mode
+            self._append_to_json_file(product)
+            self._append_to_csv_file(product)
+            
+            # Add to chunk manager for efficient storage
+            self.chunk_manager.add_single_product(asdict(product))
+            
+            # Update lightweight tracking (no full product storage)
+            self.saved_count += 1
+            self.site_counts[product.source_site] = self.site_counts.get(product.source_site, 0) + 1
+            self.products_scraped_since_rotation += 1
+            
+            # Update current stats for Socket.IO
+            self.current_stats['total_products'] = self.saved_count
+            self.current_stats['site_breakdown'] = self.site_counts.copy()
+            
+            logger.debug(f"✅ Product saved immediately: {product.product_name[:30]}...")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to save product immediately: {e}")
+            return False
         
-        # Update current stats
-        self.current_stats['total_products'] = len(self.scraped_products)
-        self.current_stats['site_breakdown'][product.source_site] = self.current_stats['site_breakdown'].get(product.source_site, 0) + 1
+        # ✅ BROWSER SESSION ROTATION: Prevent memory leaks
+        if self.products_scraped_since_rotation >= self.max_products_per_session:
+            self._rotate_browser_session()
         
         # Emit real-time updates if socketio is available
         if self.socketio:
+            self.last_product_id += 1
             self.socketio.emit('new_product', {
-                'id': len(self.scraped_products),
+                'id': self.last_product_id,
                 'name': product.product_name,
                 'price': product.unit_price,
                 'site': product.source_site,
@@ -2938,18 +2982,7 @@ class UniversalScraper:
             
             self.socketio.emit('stats_update', self.current_stats)
         
-        # 🔥 IMMEDIATE SAVE - Save each product immediately for better UX and data safety
-        try:
-            # Save single product immediately to files
-            self.chunk_manager.add_single_product(asdict(product))
-            logger.debug(f"✅ Product saved immediately: {product.product_name[:30]}...")
-        except Exception as e:
-            logger.error(f"❌ Failed to save product immediately: {e}")
-            
-            # Fallback to periodic save if immediate save fails
-            self.save_products_periodically()  # Save after every single product
-        
-        logger.info(f"Product added: {product.product_name[:50]}... ({product.source_site})")
+        logger.info(f"✅ Product added and saved: {product.product_name[:50]}... ({product.source_site})")
         return True
     
     def get_statistics(self, products):
@@ -3108,7 +3141,7 @@ class UniversalScraper:
     def insert_products_to_database(self, table_name, mapping, db_config=None):
         """Insert scraped products into database table"""
         try:
-            if not self.scraped_products:
+            if self.saved_count == 0:
                 return {
                     'success': False,
                     'error': 'No products to insert. Please run scraping first.'
@@ -3129,7 +3162,8 @@ class UniversalScraper:
                     
                     # Insert products using mapping
                     inserted_count = 0
-                    for product in self.scraped_products:
+                    products = self._load_products_from_file()
+                    for product in products:
                         try:
                             # Build dynamic INSERT query based on mapping
                             mapped_values = {}
@@ -3158,9 +3192,9 @@ class UniversalScraper:
                     
                     return {
                         'success': True,
-                        'message': f'Successfully inserted {inserted_count} out of {len(self.scraped_products)} products',
+                        'message': f'Successfully inserted {inserted_count} out of {len(products)} products',
                         'inserted_count': inserted_count,
-                        'total_count': len(self.scraped_products)
+                        'total_count': len(products)
                     }
                     
                 except ImportError:
@@ -3211,7 +3245,8 @@ class UniversalScraper:
                 
                 # Insert products
                 inserted_count = 0
-                for product in self.scraped_products:
+                products = self._load_products_from_file()
+                for product in products:
                     try:
                         cursor.execute('''
                             INSERT INTO products (
@@ -3242,9 +3277,9 @@ class UniversalScraper:
                 
                 return {
                     'success': True,
-                    'message': f'Successfully inserted {inserted_count} out of {len(self.scraped_products)} products',
+                    'message': f'Successfully inserted {inserted_count} out of {len(products)} products',
                     'inserted_count': inserted_count,
-                    'total_count': len(self.scraped_products)
+                    'total_count': len(products)
                 }
             
         except Exception as e:
@@ -4431,16 +4466,16 @@ class UniversalScraper:
                     for item in data:
                         # Convert dict back to Product object
                         product = Product(**item)
-                        self.scraped_products.append(product)
+                        # ✅ STREAMING: Just track URLs, don't load full products into memory
                         self.scraped_urls.add(product.source_url)
+                        self.saved_count += 1
+                        self.site_counts[product.source_site] = self.site_counts.get(product.source_site, 0) + 1
                     
                     # Update stats
-                    self.current_stats['total_products'] = len(self.scraped_products)
-                    for product in self.scraped_products:
-                        site = product.source_site
-                        self.current_stats['site_breakdown'][site] = self.current_stats['site_breakdown'].get(site, 0) + 1
+                    self.current_stats['total_products'] = self.saved_count
+                    self.current_stats['site_breakdown'] = self.site_counts.copy()
                     
-                    logger.info(f"Loaded {len(self.scraped_products)} existing products from {json_file}")
+                    logger.info(f"✅ Loaded {self.saved_count} existing products from {json_file} (streaming mode)")
                     return
             
             # If no JSON file, try CSV file
@@ -4472,16 +4507,16 @@ class UniversalScraper:
                                 product_data[key] = value if value else ""
                         
                         product = Product(**product_data)
-                        self.scraped_products.append(product)
+                        # ✅ STREAMING: Just track URLs, don't load full products into memory
                         self.scraped_urls.add(product.source_url)
+                        self.saved_count += 1
+                        self.site_counts[product.source_site] = self.site_counts.get(product.source_site, 0) + 1
                     
                     # Update stats
-                    self.current_stats['total_products'] = len(self.scraped_products)
-                    for product in self.scraped_products:
-                        site = product.source_site
-                        self.current_stats['site_breakdown'][site] = self.current_stats['site_breakdown'].get(site, 0) + 1
+                    self.current_stats['total_products'] = self.saved_count
+                    self.current_stats['site_breakdown'] = self.site_counts.copy()
                     
-                    logger.info(f"Loaded {len(self.scraped_products)} existing products from {csv_file}")
+                    logger.info(f"✅ Loaded {self.saved_count} existing products from {csv_file} (streaming mode)")
                     
         except Exception as e:
             logger.error(f"Error loading existing data: {e}")
@@ -4490,32 +4525,153 @@ class UniversalScraper:
 
     
     def save_products_periodically(self):
-        """Save products after each single product is scraped"""
-        if self.scraped_products:  # Save after every single product
-            try:
-                # Get the latest product that was just added
-                new_products = [asdict(p) for p in self.scraped_products[-1:]]  # Last 1 product
-                
-                # Add to chunk manager
-                self.chunk_manager.add_products(new_products)
-                
-                # Also maintain the legacy JSON file for backwards compatibility
-                json_file = "scraped_data/products.json"
+        """✅ STREAMING SAVE: Save products immediately without memory accumulation"""
+        # This method is now handled by the streaming add_product method
+        # Kept for backwards compatibility but does nothing
+        pass
+    
+    def _rotate_browser_session(self):
+        """✅ BROWSER ROTATION: Rotate browser session to prevent memory leaks"""
+        try:
+            logger.info(f"🔄 Rotating browser session after {self.products_scraped_since_rotation} products...")
+            
+            # Close current stealth driver
+            if self.stealth_driver:
+                try:
+                    self.stealth_driver.quit()
+                    logger.info("✅ Stealth driver closed for rotation")
+                except Exception as e:
+                    logger.debug(f"Error closing stealth driver: {e}")
+            
+            # Close main driver if exists
+            if self.driver:
+                try:
+                    self.driver.quit()
+                    logger.info("✅ Main driver closed for rotation")
+                except Exception as e:
+                    logger.debug(f"Error closing main driver: {e}")
+            
+            # Recreate drivers
+            self.stealth_driver = None
+            self.driver = None
+            self._init_stealth_driver()
+            
+            # Reset counter
+            self.products_scraped_since_rotation = 0
+            logger.info("✅ Browser session rotated successfully")
+            
+        except Exception as e:
+            logger.error(f"Error rotating browser session: {e}")
+    
+    def _append_to_json_file(self, product):
+        """✅ EFFICIENT FILE I/O: Append single product to JSON file without overwriting existing data"""
+        try:
+            json_file = "scraped_data/products.json"
+            
+            # Check if file exists and has content
+            if os.path.exists(json_file) and os.path.getsize(json_file) > 0:
+                # Read existing content to check if it's valid JSON
+                try:
+                    with open(json_file, 'r', encoding='utf-8') as f:
+                        content = f.read().strip()
+                    
+                    # If file ends with ], it's a complete JSON array - we need to modify it
+                    if content.endswith(']'):
+                        # Remove the closing ] and add our product
+                        content = content[:-1]  # Remove the ]
+                        with open(json_file, 'w', encoding='utf-8') as f:
+                            if len(content.strip()) > 1:  # More than just [
+                                f.write(content + ',\n' + json.dumps(asdict(product), indent=2, ensure_ascii=False) + '\n]')
+                            else:  # Empty array
+                                f.write(content + '\n' + json.dumps(asdict(product), indent=2, ensure_ascii=False) + '\n]')
+                    else:
+                        # File is incomplete, just append
+                        with open(json_file, 'a', encoding='utf-8') as f:
+                            f.write(',\n' + json.dumps(asdict(product), indent=2, ensure_ascii=False))
+                except:
+                    # If reading fails, just append
+                    with open(json_file, 'a', encoding='utf-8') as f:
+                        f.write(',\n' + json.dumps(asdict(product), indent=2, ensure_ascii=False))
+            else:
+                # Create new file with first product
                 with open(json_file, 'w', encoding='utf-8') as f:
-                    json.dump([asdict(p) for p in self.scraped_products], f, indent=2, ensure_ascii=False)
+                    f.write('[\n' + json.dumps(asdict(product), indent=2, ensure_ascii=False) + '\n]')
+                    
+        except Exception as e:
+            logger.error(f"Error appending to JSON file: {e}")
+    
+    def _close_json_file(self):
+        """✅ HELPER: Close JSON array properly"""
+        try:
+            json_file = "scraped_data/products.json"
+            if os.path.exists(json_file):
+                with open(json_file, 'a', encoding='utf-8') as f:
+                    f.write('\n]')
+        except Exception as e:
+            logger.debug(f"Error closing JSON file: {e}")
+    
+    def _append_to_csv_file(self, product):
+        """✅ EFFICIENT FILE I/O: Append single product to CSV file"""
+        try:
+            csv_file = "scraped_data/products.csv"
+            
+            # Check if file exists
+            file_exists = os.path.exists(csv_file) and os.path.getsize(csv_file) > 0
+            
+            with open(csv_file, 'a', newline='', encoding='utf-8') as f:
+                writer = csv.DictWriter(f, fieldnames=asdict(product).keys())
                 
-                # Save to persistent CSV file
-                csv_file = "scraped_data/products.csv"
-                with open(csv_file, 'w', newline='', encoding='utf-8') as f:
-                    if self.scraped_products:
-                        writer = csv.DictWriter(f, fieldnames=asdict(self.scraped_products[0]).keys())
-                        writer.writeheader()
-                        for product in self.scraped_products:
-                            writer.writerow(asdict(product))
+                # Write header only if file is new
+                if not file_exists:
+                    writer.writeheader()
                 
-                logger.info(f"Products saved to chunks and persistent files: {json_file}, {csv_file}")
-            except Exception as e:
-                logger.error(f"Failed to save products: {e}")
+                # Write product data
+                writer.writerow(asdict(product))
+                
+        except Exception as e:
+            logger.error(f"Error appending to CSV file: {e}")
+    
+    def _load_products_from_file(self):
+        """✅ HELPER: Load products from JSON file for database operations"""
+        try:
+            json_file = "scraped_data/products.json"
+            if os.path.exists(json_file):
+                with open(json_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    return [Product(**item) for item in data]
+            return []
+        except Exception as e:
+            logger.error(f"Error loading products from file: {e}")
+            return []
+    
+    def _load_existing_products_for_streaming(self):
+        """✅ CRITICAL: Load existing products without storing them in memory"""
+        try:
+            json_file = "scraped_data/products.json"
+            if os.path.exists(json_file) and os.path.getsize(json_file) > 0:
+                with open(json_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    
+                # Count existing products without storing them
+                self.saved_count = len(data)
+                
+                # Build lightweight tracking
+                for item in data:
+                    product = Product(**item)
+                    self.scraped_urls.add(product.source_url)
+                    self.site_counts[product.source_site] = self.site_counts.get(product.source_site, 0) + 1
+                    self.last_product_id += 1
+                
+                # Update stats
+                self.current_stats['total_products'] = self.saved_count
+                self.current_stats['site_breakdown'] = self.site_counts.copy()
+                
+                logger.info(f"✅ Loaded {self.saved_count} existing products for streaming mode")
+            else:
+                logger.info("No existing products found - starting fresh")
+        except Exception as e:
+            logger.error(f"Error loading existing products: {e}")
+            logger.info("Starting with empty product list")
     
 
     
@@ -4699,7 +4855,8 @@ class UniversalScraper:
             self.random_delay(1, 3)
         
         logger.info(f"Daraz scraping completed: {products_added} products")
-        return self.scraped_products[-products_added:]
+        # ✅ STREAMING: Return empty list since products are saved immediately
+        return []
     
     def scrape_aliexpress(self, keywords, max_products=100):
         """Scrape AliExpress products with real data only"""
@@ -4831,7 +4988,8 @@ class UniversalScraper:
             self.random_delay(5, 10)
         
         logger.info(f"AliExpress scraping completed: {products_added} products")
-        return self.scraped_products[-products_added:] if products_added > 0 else []
+        # ✅ STREAMING: Return empty list since products are saved immediately
+        return [] if products_added > 0 else []
     
     def scrape_etsy(self, keywords, max_products=100):
         """Scrape Etsy products with real data only"""
@@ -4960,7 +5118,8 @@ class UniversalScraper:
             self.random_delay(5, 10)
         
         logger.info(f"Etsy scraping completed: {products_added} products")
-        return self.scraped_products[-products_added:] if products_added > 0 else []
+        # ✅ STREAMING: Return empty list since products are saved immediately
+        return [] if products_added > 0 else []
     
     def scrape_valuebox(self, keywords, max_products=100):
         """Scrape ValueBox products with real data only"""
@@ -5105,13 +5264,17 @@ class UniversalScraper:
             self.random_delay(5, 10)
         
         logger.info(f"ValueBox scraping completed: {products_added} products")
-        return self.scraped_products[-products_added:] if products_added > 0 else []
+        # ✅ STREAMING: Return empty list since products are saved immediately
+        return [] if products_added > 0 else []
     
     def scrape_selected_sites(self, keywords, max_products_per_site=100, selected_sites=None):
         """Scrape only selected sites"""
         if selected_sites is None:
             # Focus on sites that are currently working
             selected_sites = ['amazon', 'valuebox']  # eBay, Daraz, AliExpress, Etsy are currently blocked
+        
+        # 🚫 CRITICAL FIX: Disable chunk manager interference during scraping
+        self.chunk_manager.set_scraping_active(True)
         
         # Map site names to proper case and ensure they match the scraper methods
         site_mapping = {
@@ -5184,15 +5347,17 @@ class UniversalScraper:
                 self.emit_update('site_error', {'site': site_name, 'error': str(e)})
                 continue
         
-        # Final cleanup and save
-        final_products = self.clean_and_deduplicate(self.scraped_products)
-        saved_files = self.save_products(final_products)
+        # ✅ STREAMING: Final cleanup - products already saved individually
+        logger.info(f"Scraping completed. {self.saved_count} products saved using streaming approach.")
         
         self.emit_update('scraping_completed', {
-            'total_products': len(final_products),
-            'site_breakdown': self.current_stats['site_breakdown'],
-            'files': saved_files
+            'total_products': self.saved_count,
+            'site_breakdown': self.site_counts,
+            'files': ['scraped_data/products.json', 'scraped_data/products.csv']
         })
+        
+        # ✅ CRITICAL FIX: Re-enable chunk manager after scraping completes
+        self.chunk_manager.set_scraping_active(False)
         
         return final_products
     
@@ -5247,9 +5412,9 @@ class UniversalScraper:
     def get_scraping_stats(self):
         """Get current scraping statistics"""
         return {
-            'total_products': len(self.scraped_products),
+            'total_products': self.saved_count,
             'unique_urls': len(self.scraped_urls),
-            'site_breakdown': self.current_stats.get('site_breakdown', {}),
+            'site_breakdown': self.site_counts,
             'current_status': self.current_stats.get('current_status', 'Ready')
         }
 
@@ -5451,27 +5616,45 @@ class UniversalScraper:
     def cleanup(self):
         """Cleanup and save data when scraper is stopped"""
         try:
-            if self.scraped_products:
-                logger.info("Saving data before cleanup...")
-                self.save_products_periodically()
-                # Force save any pending products in chunk manager
-                self.chunk_manager.force_save()
-                logger.info(f"Cleanup completed. {len(self.scraped_products)} products saved.")
+            logger.info("Cleaning up scraper resources...")
+            
+            # ✅ BROWSER CLEANUP: Properly close browser sessions
+            if self.stealth_driver:
+                try:
+                    self.stealth_driver.quit()
+                    logger.info("✅ Stealth driver closed")
+                except Exception as e:
+                    logger.debug(f"Error closing stealth driver: {e}")
+            
+            if self.driver:
+                try:
+                    self.driver.quit()
+                    logger.info("✅ Main driver closed")
+                except Exception as e:
+                    logger.debug(f"Error closing main driver: {e}")
+            
+            # Force save any pending products in chunk manager
+            self.chunk_manager.force_save()
+            
+            # Close JSON file properly
+            self._close_json_file()
+            
+            logger.info(f"Cleanup completed. {self.saved_count} products saved.")
         except Exception as e:
             logger.error(f"Error during cleanup: {e}")
     
     def force_save(self):
         """Force save current data to persistent files and chunks"""
         try:
-            if self.scraped_products:
-                logger.info("Force saving current data...")
-                self.save_products_periodically()
-                # Force save any pending products in chunk manager
-                self.chunk_manager.force_save()
-                return True
-            else:
-                logger.info("No products to save")
-                return False
+            logger.info("Force saving current data...")
+            # Force save any pending products in chunk manager
+            self.chunk_manager.force_save()
+            
+            # Close JSON file properly
+            self._close_json_file()
+            
+            logger.info(f"Force save completed. {self.saved_count} products saved.")
+            return True
         except Exception as e:
             logger.error(f"Error force saving: {e}")
             return False

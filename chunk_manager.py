@@ -21,10 +21,19 @@ class ChunkManager:
         self.cache_dir = "scraped_data/cache"
         self.index_file = os.path.join(chunks_dir, "index.json")
         self.temp_products = []  # Buffer for new products
+        self.scraping_active = False  # Flag to prevent interference during scraping
         
         # Create directories
         os.makedirs(self.chunks_dir, exist_ok=True)
         os.makedirs(self.cache_dir, exist_ok=True)
+    
+    def set_scraping_active(self, active: bool):
+        """Set the scraping active flag to prevent interference during scraping"""
+        self.scraping_active = active
+        if active:
+            logger.info("🚫 Chunk manager: Scraping active - chunk updates disabled")
+        else:
+            logger.info("✅ Chunk manager: Scraping inactive - chunk updates enabled")
         
     def initialize_from_existing(self):
         """Initialize chunks from existing products.json file"""
@@ -580,6 +589,11 @@ class ChunkManager:
         json_file = "scraped_data/products.json"
         
         if not os.path.exists(json_file):
+            return
+        
+        # 🚫 CRITICAL FIX: Don't interfere during active scraping
+        if self.scraping_active:
+            logger.info("🚫 Scraping in progress - skipping chunk update to prevent data loss")
             return
         
         # Get modification times

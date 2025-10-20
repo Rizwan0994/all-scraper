@@ -635,7 +635,7 @@ class EnhancedAIVariantExtractor:
         return ""
     
     def _extract_price_from_swatch_element(self, element) -> float:
-        """Extract price from the swatch element itself"""
+        """Extract price from the swatch element itself - FIXED VERSION"""
         try:
             # Get the text from the swatch element
             element_text = element.text
@@ -643,25 +643,37 @@ class EnhancedAIVariantExtractor:
             # Look for price patterns in the swatch text
             import re
             
-            # Pattern for "7 options from $185.00"
-            price_pattern = r'\$(\d+\.?\d*)'
-            matches = re.findall(price_pattern, element_text)
+            # 🎯 CRITICAL FIX: Enhanced price patterns with proper comma handling
+            price_patterns = [
+                r'\$(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)',  # $1,019.99
+                r'\$(\d+\.?\d*)',  # $1019.99 (fallback)
+            ]
             
-            if matches:
-                # Take the last price found (usually the main price)
-                price = float(matches[-1])
-                logger.info(f"🎯 SWATCH PRICE: Extracted ${price} from swatch text: '{element_text}'")
-                return price
+            for pattern in price_patterns:
+                matches = re.findall(pattern, element_text)
+                if matches:
+                    # Take the last price found (usually the main price)
+                    price_str = matches[-1]
+                    # 🎯 CRITICAL FIX: Remove commas before converting to float
+                    price_str = price_str.replace(',', '')
+                    price = float(price_str)
+                    logger.info(f"🎯 SWATCH PRICE: Extracted ${price} from swatch text: '{element_text}'")
+                    return price
             
             # Also check parent and sibling elements
             try:
                 parent = element.find_element(By.XPATH, "..")
                 parent_text = parent.text
-                matches = re.findall(price_pattern, parent_text)
-                if matches:
-                    price = float(matches[-1])
-                    logger.info(f"🎯 PARENT PRICE: Extracted ${price} from parent text: '{parent_text[:100]}...'")
-                    return price
+                
+                # 🎯 CRITICAL FIX: Use same enhanced patterns for parent
+                for pattern in price_patterns:
+                    matches = re.findall(pattern, parent_text)
+                    if matches:
+                        price_str = matches[-1]
+                        price_str = price_str.replace(',', '')  # Remove commas
+                        price = float(price_str)
+                        logger.info(f"🎯 PARENT PRICE: Extracted ${price} from parent text: '{parent_text[:100]}...'")
+                        return price
             except:
                 pass
                 
@@ -905,61 +917,49 @@ class EnhancedAIVariantExtractor:
         return variants
     
     def _extract_fallback_variants_with_ai(self, product_name: str, main_price: float) -> List[Dict]:
-        """FALLBACK: Extract ANY clickable elements that might be variants"""
+        """FALLBACK: Extract ANY clickable elements that might be variants - OPTIMIZED VERSION"""
         variants = []
         
         try:
             logger.info("🔍 FALLBACK: Searching for ANY clickable variant elements...")
             
-            # VERY BROAD selectors to catch anything we missed
+            # 🎯 OPTIMIZED: Focus on most likely selectors first
             fallback_selectors = [
-                # 🎯 ALL Amazon button elements
+                # 🎯 PRIORITY: Amazon size/storage buttons (most likely to work)
+                "input[name='0'], input[name='1'], input[name='2']",  # Direct radio button targeting
+                "#variation_size_name .a-button-toggle",
+                "div[data-csa-c-content-id*='size'] .a-button-toggle",
+                
+                # 🎯 PRIORITY: Amazon color buttons
+                "#variation_color_name .a-button-toggle",
+                "div[data-csa-c-content-id*='color'] .a-button-toggle",
+                
+                # 🎯 SECONDARY: General Amazon button elements
                 ".a-button-toggle",
-                ".a-button-toggle-text", 
                 ".a-button-inner",
                 ".a-button-text",
-                ".a-button",
                 
-                # 🎯 ANY button-like elements
+                # 🎯 TERTIARY: Generic button-like elements
                 "button[class*='button']",
-                "a[class*='button']", 
                 "div[class*='button']",
                 "span[class*='button']",
                 
-                # 🎯 ANY toggle elements
+                # 🎯 LAST RESORT: Very broad selectors
                 "[class*='toggle']",
                 "[class*='swatch']",
                 "[class*='option']",
                 "[class*='variant']",
                 "[class*='selection']",
-                
-                # 🎯 ANY clickable divs/spans with text
                 "div[onclick]",
                 "span[onclick]",
                 "div[role='button']",
-                "span[role='button']",
-                
-                # 🎯 Amazon-specific broad selectors
-                "[data-csa-c-element-id]",
-                "[data-csa-c-content-id]",
-                "[data-csa-c-type='image-thumbnail']",
-                "[data-csa-c-type='button']",
-                
-                # 🎯 NEW: Any element with specific Amazon classes
-                ".a-button-inner",
-                ".a-button-text",
-                ".imgSwatch",
-                ".image-swatch-wrapper",
-                ".swatch-variation",
-                
-                # 🎯 NEW: Any element containing color/size text
-                "*:contains('Black')",
-                "*:contains('White')",
-                "*:contains('Blue')",
-                "*:contains('Small')",
-                "*:contains('Medium')",
-                "*:contains('Large')"
+                "span[role='button']"
             ]
+            
+            # 🎯 CRITICAL FIX: Add early exit mechanism to prevent time waste
+            max_elements_to_process = 20  # Limit processing to prevent 10-minute extractions
+            elements_processed = 0
+            wrong_price_count = 0  # Track consecutive wrong prices
             
             for selector in fallback_selectors:
                 try:
@@ -969,6 +969,16 @@ class EnhancedAIVariantExtractor:
                         logger.info(f"🔍 FALLBACK found {len(elements)} elements with selector: {selector}")
                     
                     for element in elements:
+                        # 🎯 CRITICAL FIX: Early exit if processing too many elements
+                        if elements_processed >= max_elements_to_process:
+                            logger.warning(f"⚠️ Early exit: Processed {elements_processed} elements, stopping to prevent time waste")
+                            break
+                            
+                        # 🎯 CRITICAL FIX: Early exit if getting too many wrong prices
+                        if wrong_price_count >= 5:
+                            logger.warning(f"⚠️ Early exit: Too many wrong prices detected ({wrong_price_count}), stopping extraction")
+                            break
+                            
                         try:
                             # Get variant text
                             variant_text = self._get_element_text(element)
@@ -1036,6 +1046,13 @@ class EnhancedAIVariantExtractor:
                                 # Get real price by clicking variant
                                 variant_price = self._get_variant_price_by_clicking(element, main_price)
                                 
+                                # 🎯 CRITICAL FIX: Track wrong prices for early exit
+                                if variant_price <= 1.0 and main_price > 100.0:
+                                    wrong_price_count += 1
+                                    logger.warning(f"⚠️ Wrong price detected: ${variant_price} for expensive product (${main_price})")
+                                else:
+                                    wrong_price_count = 0  # Reset counter on good price
+                                
                                 variants.append({
                                     'type': classification.variant_type,
                                     'name': self._clean_variant_name(variant_text),
@@ -1051,9 +1068,15 @@ class EnhancedAIVariantExtractor:
                                 
                                 logger.info(f"✅ FALLBACK variant: '{variant_text}' = ${variant_price} (confidence: {classification.confidence:.2f})")
                                 
+                            elements_processed += 1
+                                
                         except Exception as e:
                             logger.debug(f"Error processing fallback element: {e}")
                             continue
+                            
+                    # 🎯 CRITICAL FIX: Break outer loop if early exit conditions met
+                    if elements_processed >= max_elements_to_process or wrong_price_count >= 5:
+                        break
                             
                 except Exception as e:
                     logger.debug(f"Error with fallback selector {selector}: {e}")
@@ -1193,46 +1216,109 @@ class EnhancedAIVariantExtractor:
             return ""
     
     def _get_variant_price_by_clicking(self, element, fallback_price: float) -> float:
-        """Get variant price by clicking and waiting for price update"""
+        """Get variant price by clicking and waiting for price update - FIXED VERSION"""
         try:
             # Store current price
             current_price = self._get_current_price_from_page()
             logger.debug(f"Current price before clicking: {current_price}")
             
-            # 🎯 FIX: Find the actual clickable input element instead of span
-            clickable_element = element
+            # 🎯 CRITICAL FIX: Find the actual clickable input element instead of span
+            clickable_element = None
             
-            # Try to find the input radio button within the element
+            # Method 1: Look for input radio button within the element
             try:
-                # Look for input radio button (the actual clickable element)
                 input_element = element.find_element(By.CSS_SELECTOR, "input[type='radio'], input[type='checkbox']")
-                if input_element:
+                if input_element and input_element.is_displayed() and input_element.is_enabled():
                     clickable_element = input_element
-                    logger.debug(f"Found input radio button, using that for clicking")
+                    logger.debug(f"✅ Found input radio button within element")
             except:
-                # If no input found, try clicking the element itself
                 pass
             
-            # Click the correct element
-            clickable_element.click()
-            logger.debug(f"Clicked variant element")
+            # Method 2: Look for input radio button in parent elements
+            if not clickable_element:
+                try:
+                    parent = element.find_element(By.XPATH, "..")
+                    input_element = parent.find_element(By.CSS_SELECTOR, "input[type='radio'], input[type='checkbox']")
+                    if input_element and input_element.is_displayed() and input_element.is_enabled():
+                        clickable_element = input_element
+                        logger.debug(f"✅ Found input radio button in parent")
+                except:
+                    pass
             
-            # Wait longer for page to update (Amazon is slow)
-            time.sleep(3)  # Increased from 2 to 3 seconds
+            # Method 3: Look for input radio button in sibling elements
+            if not clickable_element:
+                try:
+                    parent = element.find_element(By.XPATH, "..")
+                    siblings = parent.find_elements(By.CSS_SELECTOR, "input[type='radio'], input[type='checkbox']")
+                    for sibling in siblings:
+                        if sibling.is_displayed() and sibling.is_enabled():
+                            clickable_element = sibling
+                            logger.debug(f"✅ Found input radio button in siblings")
+                            break
+                except:
+                    pass
             
-            # Try multiple times to get the updated price
+            # Method 4: If no input found, try to find by aria-labelledby attribute
+            if not clickable_element:
+                try:
+                    element_id = element.get_attribute('id')
+                    if element_id:
+                        # Look for input with aria-labelledby matching this element's id
+                        input_element = self.driver.find_element(By.CSS_SELECTOR, f"input[aria-labelledby='{element_id}']")
+                        if input_element and input_element.is_displayed() and input_element.is_enabled():
+                            clickable_element = input_element
+                            logger.debug(f"✅ Found input radio button by aria-labelledby")
+                except:
+                    pass
+            
+            # If still no input found, use the original element but with better error handling
+            if not clickable_element:
+                clickable_element = element
+                logger.warning(f"⚠️ No input radio button found, using original element")
+            
+            # 🎯 CRITICAL FIX: Use proper Selenium click strategies
+            try:
+                # Scroll element into view first
+                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", clickable_element)
+                time.sleep(0.5)
+                
+                # Try direct click first
+                clickable_element.click()
+                logger.debug(f"✅ Successfully clicked element directly")
+                
+            except Exception as e:
+                logger.debug(f"Direct click failed: {e}, trying JavaScript click")
+                try:
+                    # Use JavaScript click as fallback
+                    self.driver.execute_script("arguments[0].click();", clickable_element)
+                    logger.debug(f"✅ Successfully clicked element with JavaScript")
+                except Exception as e2:
+                    logger.error(f"Both direct and JavaScript click failed: {e2}")
+                    return fallback_price
+            
+            # Wait for page to update (Amazon is slow)
+            time.sleep(2)
+            
+            # Try multiple times to get the updated price with validation
             new_price = None
             for attempt in range(3):
-                time.sleep(1)  # Additional wait
+                time.sleep(1)
                 new_price = self._get_current_price_from_page()
                 logger.debug(f"Attempt {attempt + 1}: New price after clicking: {new_price}")
                 
+                # 🎯 CRITICAL FIX: Validate price makes sense
                 if new_price and new_price != current_price:
-                    logger.info(f"✅ Price updated: {current_price} → {new_price}")
-                    return new_price
+                    # Check if price is reasonable (not $1.0 for expensive products)
+                    if new_price > 1.0 or fallback_price <= 100.0:  # Only accept $1.0 if original price was low
+                        logger.info(f"✅ Price updated: {current_price} → {new_price}")
+                        return new_price
+                    else:
+                        logger.warning(f"⚠️ Price ${new_price} seems too low for this product, trying again...")
+                        time.sleep(1)
+                        continue
                     
-            # If no price change detected, return fallback
-            logger.warning(f"⚠️ No price change detected, using fallback: {fallback_price}")
+            # If no valid price change detected, return fallback
+            logger.warning(f"⚠️ No valid price change detected, using fallback: {fallback_price}")
             return fallback_price
                 
         except Exception as e:
@@ -1325,7 +1411,7 @@ class EnhancedAIVariantExtractor:
             return fallback_price
     
     def _get_current_price_from_page(self) -> Optional[float]:
-        """Extract current price from the page with enhanced detection"""
+        """Extract current price from the page with enhanced detection - FIXED VERSION"""
         try:
             # Enhanced price selectors in order of reliability
             price_selectors = [
@@ -1349,28 +1435,37 @@ class EnhancedAIVariantExtractor:
                     for element in elements:
                         price_text = element.text.strip()
                         if price_text:
-                            # Enhanced price extraction with better regex
+                            # 🎯 CRITICAL FIX: Enhanced price extraction with proper comma handling
                             import re
-                            # Look for USD price patterns
+                            
+                            # 🚨 REJECT PKR/Non-USD prices FIRST
+                            if any(currency in price_text.upper() for currency in ['PKR', 'Rs.', 'Rs ', '₹', '₨']):
+                                logger.warning(f"🚨 REJECTED NON-USD PRICE: {price_text}")
+                                continue
+                            
+                            # Look for USD price patterns with proper comma handling
                             price_patterns = [
-                                r'\$\s*(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)',  # $123.45 or $1,234.56
-                                r'(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)',  # Just numbers
+                                r'\$\s*(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)',  # $1,234.56
+                                r'(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)',  # Just numbers with commas
                             ]
                             
                             for pattern in price_patterns:
-                                price_match = re.search(pattern, price_text.replace(',', ''))
+                                price_match = re.search(pattern, price_text)
                                 if price_match:
                                     try:
-                                        # 🚨 REJECT PKR/Non-USD prices
-                                        if any(currency in price_text.upper() for currency in ['PKR', 'Rs.', 'Rs ', '₹', '₨']):
-                                            logger.warning(f"🚨 REJECTED NON-USD PRICE: {price_text}")
-                                            continue
-                                            
-                                        price = float(price_match.group(1) if '$' in pattern else price_match.group())
-                                        if 0.50 <= price <= 10000.00:  # Reasonable price range
+                                        # 🎯 CRITICAL FIX: Remove commas before converting to float
+                                        price_str = price_match.group(1) if '$' in pattern else price_match.group()
+                                        price_str = price_str.replace(',', '')  # Remove commas
+                                        price = float(price_str)
+                                        
+                                        # 🎯 CRITICAL FIX: Better price validation
+                                        if 0.50 <= price <= 50000.00:  # Extended range for expensive products
                                             logger.debug(f"Found price with selector '{selector}': ${price}")
                                             return price
-                                    except ValueError:
+                                        else:
+                                            logger.debug(f"Price ${price} outside reasonable range, skipping")
+                                    except ValueError as ve:
+                                        logger.debug(f"ValueError converting price '{price_str}': {ve}")
                                         continue
                 except Exception as e:
                     logger.debug(f"Error with price selector '{selector}': {e}")
@@ -1379,18 +1474,20 @@ class EnhancedAIVariantExtractor:
             # Fallback: Parse entire page source for price patterns
             try:
                 page_source = self.driver.page_source
-                # Look for USD price patterns
+                # Look for USD price patterns with proper comma handling
                 price_patterns = [
-                    r'\$\s*(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)',  # $123.45 or $1,234.56
-                    r'USD\s*(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)',  # USD 123.45
+                    r'\$\s*(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)',  # $1,234.56
+                    r'USD\s*(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)',  # USD 1,234.56
                 ]
                 
                 for pattern in price_patterns:
                     matches = re.findall(pattern, page_source)
                     for match in matches:
                         try:
-                            price = float(match.replace(',', ''))
-                            if 0.50 <= price <= 10000.00:  # Reasonable price range
+                            # 🎯 CRITICAL FIX: Remove commas before converting to float
+                            price_str = match.replace(',', '')
+                            price = float(price_str)
+                            if 0.50 <= price <= 50000.00:  # Extended range
                                 logger.debug(f"Found price in page source: ${price}")
                                 return price
                         except ValueError:

@@ -1,0 +1,12 @@
+[
+{"type":"header","version":"5.2.2","comment":"Export to JSON plugin for PHPMyAdmin"},
+{"type":"database","name":"scrapping"},
+{"type":"table","name":"product_attributes","database":"scrapping","data":
+[
+{"id":"1","product_id":"1","attribute_id":"1","created_by":null,"updated_by":null,"deleted_at":null,"created_at":null,"updated_at":null,"type":"parent"},
+{"id":"2","product_id":"1","attribute_id":"12","created_by":null,"updated_by":null,"deleted_at":null,"created_at":null,"updated_at":null,"type":"parent"},
+{"id":"3","product_id":"1","attribute_id":"4","created_by":null,"updated_by":null,"deleted_at":null,"created_at":null,"updated_at":null,"type":"child"},
+{"id":"4","product_id":"1","attribute_id":"14","created_by":null,"updated_by":null,"deleted_at":null,"created_at":null,"updated_at":null,"type":"child"}
+]
+}
+]

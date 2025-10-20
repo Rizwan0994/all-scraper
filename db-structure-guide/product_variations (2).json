@@ -1,0 +1,10 @@
+[
+{"type":"header","version":"5.2.2","comment":"Export to JSON plugin for PHPMyAdmin"},
+{"type":"database","name":"scrapping"},
+{"type":"table","name":"product_variations","database":"scrapping","data":
+[
+{"id":"1","product_id":"1","sku":"dfd343","purchase_price":"40.00","unit_price":"40.00","current_stock":"40","created_by":"1","updated_by":"1","deleted_at":null,"created_at":"2025-10-20 07:34:03","updated_at":"2025-10-20 07:34:03","discount":null,"discount_type":"13","combination":"Green \/ Medium","stock_status":null},
+{"id":"2","product_id":"2","sku":"34sd","purchase_price":"434.00","unit_price":"434.00","current_stock":"344","created_by":"1","updated_by":"1","deleted_at":null,"created_at":"2025-10-20 07:37:16","updated_at":"2025-10-20 07:37:16","discount":"30","discount_type":"13","combination":"single_combination","stock_status":"11"}
+]
+}
+]

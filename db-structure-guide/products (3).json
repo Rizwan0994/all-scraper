@@ -1,0 +1,10 @@
+[
+{"type":"header","version":"5.2.2","comment":"Export to JSON plugin for PHPMyAdmin"},
+{"type":"database","name":"scrapping"},
+{"type":"table","name":"products","database":"scrapping","data":
+[
+{"id":"1","name":"ere345ttrtrt","slug":"ere345ttrtrt","unit":"26","min_purchase_qty":"1","max_purchase_qty":"1","meta_title":"DEBUG Test Product via DB Manager","price":null,"sku":null,"current_stock":null,"discount":null,"delivery_time":"24","weight":"04","height":"04","length":"04","width":"04","product_description":"<p>rtrterrrrrrrrrrrrreeeeeeeeee<\/p>","meta_description":"<p>ttttttttttreeeeeeee<\/p>","order_count":"0","product_reviews":"0","disocunt_type":null,"child_category":"171","stock":null,"status":"8","brand":"16","created_by":"1","updated_by":"1","deleted_at":null,"created_at":"2025-10-20 07:34:03","updated_at":"2025-10-20 07:34:03","product_reviews_avg":"0.00","store_id":"12","product_reviews_sum":"0.00","is_featured":"0","views_count":"0","variation_type":"MULTIPLE","source_url":null,"h1":null},
+{"id":"2","name":"DEBUG Test Product via DB Manager","slug":"debug-test-product-via-db-manager","unit":"26","min_purchase_qty":"143","max_purchase_qty":"14","meta_title":"DEBUG Test Product via DB Manager","price":null,"sku":null,"current_stock":null,"discount":null,"delivery_time":"24","weight":"034","height":"043","length":"340","width":"034","product_description":"<p>43433333333333<\/p>","meta_description":"<p>fdddddddddddddddd<\/p>","order_count":"0","product_reviews":"0","disocunt_type":null,"child_category":"17","stock":null,"status":"8","brand":"16","created_by":"1","updated_by":"1","deleted_at":null,"created_at":"2025-10-20 07:37:16","updated_at":"2025-10-20 07:37:16","product_reviews_avg":"0.00","store_id":"2","product_reviews_sum":"0.00","is_featured":"0","views_count":"0","variation_type":"SINGLE","source_url":null,"h1":null}
+]
+}
+]
