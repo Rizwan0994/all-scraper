@@ -135,9 +135,13 @@ class DatabaseManager:
                         
                         # Update existing product
                         if self._update_existing_product(cursor, existing_product_id, product):
+                            # Commit immediately after successful update
+                            self.connection.commit()
                             updated_count += 1
-                            logger.info(f"Product {i+1} updated successfully. Total updated: {updated_count}")
+                            logger.info(f"Product {i+1} updated and committed successfully. Total updated: {updated_count}")
                         else:
+                            # Rollback failed update
+                            self.connection.rollback()
                             logger.error(f"Failed to update product: {product.get('product_name', 'Unknown')}")
                     else:
                         # Insert new product
@@ -154,16 +158,25 @@ class DatabaseManager:
                             # Insert product variations
                             self._insert_product_variations(cursor, product_id, product)
                             
+                            # Commit immediately after successful insertion
+                            self.connection.commit()
                             inserted_count += 1
-                            logger.info(f"Product {i+1} fully inserted. Total inserted: {inserted_count}")
+                            logger.info(f"Product {i+1} fully inserted and committed. Total inserted: {inserted_count}")
                         else:
+                            # Rollback failed insertion
+                            self.connection.rollback()
                             logger.error(f"Failed to insert main product for: {product.get('product_name', 'Unknown')}")
                         
                 except Exception as e:
+                    # Rollback any partial changes for this product
+                    try:
+                        self.connection.rollback()
+                    except:
+                        pass
                     logger.error(f"Error processing product {product.get('product_name', 'Unknown')}: {e}")
                     continue
             
-            self.connection.commit()
+            # No need for final commit as each product is committed individually
             cursor.close()
             
             return {
@@ -195,11 +208,11 @@ class DatabaseManager:
                 order_count, product_reviews, disocunt_type, child_category, stock,
                 status, brand, created_by, updated_by, created_at, updated_at,
                 product_reviews_avg, store_id, product_reviews_sum, is_featured,
-                views_count, variation_type, h1
+                views_count, variation_type, source_url, h1
             ) VALUES (
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, %s, %s
+                %s, %s, %s, %s
             )
             """
             
@@ -249,6 +262,7 @@ class DatabaseManager:
                 '0',  # is_featured
                 0,  # views_count
                 variation_type,  # variation_type - FIXED!
+                product.get('source_url', ''),  # source_url - ADDED!
                 None  # h1
             )
             
@@ -379,6 +393,11 @@ class DatabaseManager:
                     total_links += 1
             
             logger.info(f"Successfully created {total_links} attribute links for product ID: {product_id}")
+            
+            # CRITICAL FIX: Commit after attribute creation to ensure they're available for foreign key references
+            if hasattr(self, 'connection') and self.connection:
+                self.connection.commit()
+                logger.debug(f"Committed attributes for product ID: {product_id}")
 
         except Exception as e:
             logger.error(f"Error inserting product attributes: {e}")
@@ -451,12 +470,17 @@ class DatabaseManager:
                 all_default_images = []
                 
                 # Add main images (except first which is thumbnail)
+                main_images_for_variant = []
                 if len(main_images) > 1:
-                    all_default_images.extend(main_images[1:])
+                    main_images_for_variant.extend(main_images[1:])
                 
-                # Add all additional images
+                all_default_images.extend(main_images_for_variant)
+                
+                # Add unique additional images (remove duplicates with main images)
                 if additional_images:
-                    all_default_images.extend(additional_images)
+                    unique_additional = self._get_unique_additional_images(additional_images, main_images_for_variant)
+                    logger.info(f"Adding {len(unique_additional)} unique additional_images to default variant (filtered from {len(additional_images)} total)")
+                    all_default_images.extend(unique_additional)
                 
                 # Insert all collected images
                 if all_default_images:
@@ -565,10 +589,11 @@ class DatabaseManager:
                 if variant_images:
                     all_variant_images.extend(variant_images)
                 
-                # Add additional_images to FIRST variant only
+                # Add additional_images to FIRST variant only (after removing duplicates)
                 if i == 0 and additional_images:
-                    logger.info(f"Adding {len(additional_images)} additional_images to first variant")
-                    all_variant_images.extend(additional_images)
+                    unique_additional = self._get_unique_additional_images(additional_images, variant_images)
+                    logger.info(f"Adding {len(unique_additional)} unique additional_images to first variant (filtered from {len(additional_images)} total)")
+                    all_variant_images.extend(unique_additional)
                 
                 # Insert all collected images for this variant
                 if all_variant_images:
@@ -619,7 +644,11 @@ class DatabaseManager:
                     variant_stock = variant.get('stock', 0)
                     try:
                         variant_stock = int(variant_stock) if variant_stock else 0
-                        combined_stock = min(combined_stock, variant_stock) if combined_stock > 0 else variant_stock
+                        # FIXED: Proper minimum calculation - initialize with first variant's stock
+                        if combined_stock == 0:  # First variant
+                            combined_stock = variant_stock
+                        else:
+                            combined_stock = min(combined_stock, variant_stock)
                     except (ValueError, TypeError):
                         pass
                     
@@ -675,10 +704,11 @@ class DatabaseManager:
                 if variant_images:
                     all_variant_images.extend(variant_images)
                 
-                # Add additional_images to FIRST combination only
+                # Add additional_images to FIRST combination only (after removing duplicates)
                 if i == 0 and additional_images:
-                    logger.info(f"Adding {len(additional_images)} additional_images to first combination")
-                    all_variant_images.extend(additional_images)
+                    unique_additional = self._get_unique_additional_images(additional_images, variant_images)
+                    logger.info(f"Adding {len(unique_additional)} unique additional_images to first combination (filtered from {len(additional_images)} total)")
+                    all_variant_images.extend(unique_additional)
                 
                 # Insert all collected images for this combination
                 if all_variant_images:
@@ -1152,6 +1182,28 @@ class DatabaseManager:
             logger.error(f"Error converting IDs to text combination: {e}")
             return 'default_combination'
     
+    def _get_unique_additional_images(self, additional_images, variant_images):
+        """Remove duplicates between additional_images and variant images"""
+        try:
+            # Create set of existing variant image URLs (cleaned)
+            variant_urls = set()
+            for img in variant_images:
+                if img and img.strip():
+                    variant_urls.add(img.strip())
+            
+            # Filter out duplicates from additional_images
+            unique_additional = []
+            for img in additional_images:
+                if img and img.strip() and img.strip() not in variant_urls:
+                    unique_additional.append(img.strip())
+            
+            logger.info(f"Filtered {len(additional_images)} additional_images -> {len(unique_additional)} unique images")
+            return unique_additional
+            
+        except Exception as e:
+            logger.error(f"Error filtering unique additional images: {e}")
+            return additional_images  # Return original on error
+    
     def _insert_variant_images(self, cursor, variation_id, variant_images, product):
         """Insert variant-specific images into images table"""
         try:
@@ -1197,72 +1249,60 @@ class DatabaseManager:
             logger.error(f"Error inserting variant image: {e}")
     
     def _insert_product_images(self, cursor, product_id, product):
-        """Insert product images into images table"""
+        """Insert ONLY thumbnail image for product. Additional images will be linked to variants."""
         try:
-            logger.info(f"Inserting images for product ID: {product_id}")
-            logger.info(f"Product data keys: {list(product.keys())}")
+            logger.info(f"Inserting thumbnail image for product ID: {product_id}")
             
-            # Get main product images
+            # Get main product images (only need first one for thumbnail)
             main_images = product.get('product_images', [])
-            # Get additional images
-            additional_images = product.get('additional_images', [])
             
-            logger.info(f"Main images: {main_images}")
-            logger.info(f"Additional images: {additional_images}")
-            
-            # Combine all images
-            all_images = main_images + additional_images
-            
-            if not all_images:
-                logger.warning(f"No images found for product ID: {product_id}")
+            if not main_images or not main_images[0]:
+                logger.warning(f"No thumbnail image found for product ID: {product_id}")
                 logger.warning(f"Product name: {product.get('product_name', 'Unknown')}")
                 return
             
-            logger.info(f"Found {len(all_images)} images for product ID: {product_id}")
+            # Insert ONLY the first image as thumbnail
+            thumbnail_url = main_images[0]
+            logger.info(f"Inserting thumbnail: {thumbnail_url[:50]}...")
             
-            # Insert only the first image as thumbnail
-            if all_images and all_images[0]:
-                image_url = all_images[0].strip()
-                if image_url:
-                    insert_query = """
-                    INSERT INTO images (
-                        url, imageable_id, imageable_type, type, created_by, updated_by,
-                        created_at, updated_at, alt
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """
-                    
-                    # Only insert thumbnail (first image)
-                    alt_text = f"{product.get('product_name', 'Product')} - Thumbnail"
-                    
-                    values = (
-                        image_url,  # url
-                        product_id,  # imageable_id
-                        'App\\Models\\Product',  # imageable_type
-                        'thumbnail',  # type
-                        None,  # created_by
-                        None,  # updated_by
-                        datetime.now().strftime('%Y-%m-%d %H:%M:%S'),  # created_at
-                        datetime.now().strftime('%Y-%m-%d %H:%M:%S'),  # updated_at
-                        alt_text  # alt
-                    )
-                    
-                    logger.info(f"Inserting thumbnail image for product ID: {product_id}")
-                    cursor.execute(insert_query, values)
-                    image_id = cursor.lastrowid
-                    logger.info(f"Inserted thumbnail image with ID {image_id}: {image_url[:50]}...")
-                    
-                    logger.info(f"Additional images ({len(all_images)-1}) will be handled by variants")
+            insert_query = """
+            INSERT INTO images (
+                url, imageable_id, imageable_type, type, created_by, updated_by,
+                created_at, updated_at, alt
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """
             
-            logger.info(f"Successfully inserted {len(all_images)} images for product ID: {product_id}")
+            alt_text = f"{product.get('product_name', 'Product')} - Thumbnail"
             
-            # Verify images were inserted
-            verify_query = "SELECT COUNT(*) FROM images WHERE imageable_id = %s AND imageable_type = 'App\\\\Models\\\\Product'"
+            values = (
+                thumbnail_url.strip(),  # url
+                product_id,  # imageable_id
+                'App\\Models\\Product',  # imageable_type
+                'thumbnail',  # type - ONLY thumbnail for products
+                None,  # created_by
+                None,  # updated_by
+                datetime.now().strftime('%Y-%m-%d %H:%M:%S'),  # created_at
+                datetime.now().strftime('%Y-%m-%d %H:%M:%S'),  # updated_at
+                alt_text  # alt
+            )
+            
+            cursor.execute(insert_query, values)
+            image_id = cursor.lastrowid
+            logger.info(f"Inserted thumbnail image with ID {image_id} for product ID: {product_id}")
+            
+            # Log additional images info (these will be handled by variants)
+            additional_images = product.get('additional_images', [])
+            if additional_images:
+                logger.info(f"Additional images ({len(additional_images)}) will be linked to variants as 'product_variation' type")
+            
+            # Verify thumbnail was inserted
+            verify_query = "SELECT COUNT(*) FROM images WHERE imageable_id = %s AND imageable_type = 'App\\\\Models\\\\Product' AND type = 'thumbnail'"
             cursor.execute(verify_query, (product_id,))
             count = cursor.fetchone()[0]
-            logger.info(f"Verification: {count} images found in database for product ID: {product_id}")
+            logger.info(f"Verification: {count} thumbnail image stored in database for product ID: {product_id}")
             
         except Exception as e:
-            logger.error(f"Error inserting product images: {e}")
+            logger.error(f"Error inserting product thumbnail: {e}")
             logger.error(f"Product ID: {product_id}, Product: {product.get('product_name', 'Unknown')}")
     
     def _check_product_exists(self, cursor, product):
@@ -1315,7 +1355,7 @@ class DatabaseManager:
                 product_reviews = %s, disocunt_type = %s, child_category = %s, stock = %s,
                 status = %s, brand = %s, updated_by = %s, updated_at = %s,
                 product_reviews_avg = %s, store_id = %s, product_reviews_sum = %s,
-                is_featured = %s, views_count = %s, variation_type = %s, h1 = %s
+                is_featured = %s, views_count = %s, variation_type = %s, source_url = %s, h1 = %s
             WHERE id = %s
             """
             
@@ -1360,6 +1400,7 @@ class DatabaseManager:
                 '0',  # is_featured
                 0,  # views_count
                 'SINGLE',  # variation_type
+                product.get('source_url', ''),  # source_url - ADDED!
                 None,  # h1
                 product_id  # WHERE id
             )
@@ -1387,11 +1428,11 @@ class DatabaseManager:
             return False
     
     def _delete_product_images(self, cursor, product_id):
-        """Delete existing product images"""
+        """Delete existing product thumbnails only"""
         try:
-            delete_query = "DELETE FROM images WHERE imageable_id = %s AND imageable_type = 'App\\\\Models\\\\Product'"
+            delete_query = "DELETE FROM images WHERE imageable_id = %s AND imageable_type = 'App\\\\Models\\\\Product' AND type = 'thumbnail'"
             cursor.execute(delete_query, (product_id,))
-            logger.info(f"Deleted existing images for product ID: {product_id}")
+            logger.info(f"Deleted existing thumbnail images for product ID: {product_id}")
         except Exception as e:
             logger.error(f"Error deleting product images: {e}")
     
@@ -1405,8 +1446,21 @@ class DatabaseManager:
             logger.error(f"Error deleting product attributes: {e}")
     
     def _delete_product_variations(self, cursor, product_id):
-        """Delete existing product variations"""
+        """Delete existing product variations and their associated images"""
         try:
+            # First get all variation IDs for this product
+            select_query = "SELECT id FROM product_variations WHERE product_id = %s"
+            cursor.execute(select_query, (product_id,))
+            variation_ids = [row[0] for row in cursor.fetchall()]
+            
+            # Delete variant images for all variations
+            if variation_ids:
+                format_strings = ','.join(['%s'] * len(variation_ids))
+                delete_images_query = f"DELETE FROM images WHERE imageable_id IN ({format_strings}) AND imageable_type = 'App\\\\Models\\\\ProductVariation'"
+                cursor.execute(delete_images_query, variation_ids)
+                logger.info(f"Deleted existing variant images for {len(variation_ids)} variations")
+            
+            # Delete the variations themselves
             delete_query = "DELETE FROM product_variations WHERE product_id = %s"
             cursor.execute(delete_query, (product_id,))
             logger.info(f"Deleted existing variations for product ID: {product_id}")
@@ -1504,15 +1558,12 @@ class DatabaseManager:
                     
                     logger.info(f"Processing chunk {total_chunks} with {len(chunk_products):,} products...")
                     
-                    # Process products in this chunk
+                    # Process products in this chunk (each product commits individually)
                     chunk_inserted, chunk_updated = self._process_product_chunk(cursor, chunk_products)
                     total_inserted += chunk_inserted
                     total_updated += chunk_updated
                     
                     logger.info(f"Chunk {total_chunks} completed: {chunk_inserted} inserted, {chunk_updated} updated")
-                    
-                    # Commit after each chunk to avoid long transactions
-                    self.connection.commit()
             
             else:
                 # Fallback to traditional method
@@ -1525,7 +1576,7 @@ class DatabaseManager:
                 chunk_inserted, chunk_updated = self._process_product_chunk(cursor, products)
                 total_inserted += chunk_inserted
                 total_updated += chunk_updated
-                self.connection.commit()
+                # No need for final commit as each product is committed individually
             
             cursor.close()
             
@@ -1559,11 +1610,10 @@ class DatabaseManager:
             
             cursor = self.connection.cursor()
             
-            # Process all products
+            # Process all products (each product commits individually)
             total_inserted, total_updated = self._process_product_chunk(cursor, products)
             
-            # Commit transaction
-            self.connection.commit()
+            # No need for final commit as each product is committed individually
             cursor.close()
             
             logger.info(f"✅ JSON insertion completed: {total_inserted} inserted, {total_updated} updated")
@@ -1582,12 +1632,10 @@ class DatabaseManager:
                 self.connection.rollback()
             return {'success': False, 'message': f'Database error: {str(e)}'}
         
-        finally:
-            if self.connection and self.connection.is_connected():
-                self.connection.close()
+        # NOTE: Connection is NOT closed here intentionally - let the caller manage connection lifecycle
     
     def _process_product_chunk(self, cursor, products):
-        """Process a chunk of products"""
+        """Process a chunk of products with individual commits"""
         inserted_count = 0
         updated_count = 0
         
@@ -1601,7 +1649,14 @@ class DatabaseManager:
                 if existing_product_id:
                     # Update existing product
                     if self._update_existing_product(cursor, existing_product_id, product):
+                        # Commit immediately after successful update
+                        self.connection.commit()
                         updated_count += 1
+                        logger.info(f"Product {i+1} updated and committed successfully")
+                    else:
+                        # Rollback failed update
+                        self.connection.rollback()
+                        logger.error(f"Failed to update product, changes rolled back")
                 else:
                     # Insert new product
                     product_id = self._insert_main_product(cursor, product)
@@ -1610,9 +1665,22 @@ class DatabaseManager:
                         self._insert_product_images(cursor, product_id, product)
                         self._insert_product_attributes(cursor, product_id, product)
                         self._insert_product_variations(cursor, product_id, product)
+                        
+                        # Commit immediately after successful insertion
+                        self.connection.commit()
                         inserted_count += 1
+                        logger.info(f"Product {i+1} inserted and committed successfully")
+                    else:
+                        # Rollback failed insertion
+                        self.connection.rollback()
+                        logger.error(f"Failed to insert product, changes rolled back")
                         
             except Exception as e:
+                # Rollback any partial changes for this product
+                try:
+                    self.connection.rollback()
+                except:
+                    pass
                 logger.error(f"Error processing product {product.get('product_name', 'Unknown')}: {e}")
                 continue
         

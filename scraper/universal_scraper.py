@@ -2000,6 +2000,17 @@ class UniversalScraper:
                         final_additional_images = additional_images
                         logger.info(f"Product has no variants, storing {len(final_additional_images)} images as additional_images")
                     
+                    # Extract enhanced product description 
+                    amazon_features = self._extract_amazon_description(product_soup or soup)
+                    
+                    # Create enhanced descriptions with concatenation
+                    if amazon_features:
+                        product_description = f"Quality {title} from Amazon with fast shipping and customer support. {amazon_features}"
+                        meta_description = f"Buy {title} from Amazon at competitive prices. {amazon_features[:150]}..."
+                    else:
+                        product_description = f"Quality {title} from Amazon with fast shipping and customer support"
+                        meta_description = f"Buy {title} from Amazon at competitive prices"
+                    
                     # Create the product
                     product = Product(
                         product_name=title,
@@ -2010,8 +2021,8 @@ class UniversalScraper:
                         sku=sku,
                         category=category,
                         sub_category=sub_category,
-                        product_description=f"Quality {title} from Amazon with fast shipping and customer support",
-                        meta_tags_description=f"Buy {title} from Amazon at competitive prices",
+                        product_description=product_description,
+                        meta_tags_description=meta_description,
                         product_images=all_images[:1] if all_images else [],  # First image as main
                         additional_images=final_additional_images,  # Store additional images based on variant status
                         rating=rating,
@@ -6645,6 +6656,95 @@ class UniversalScraper:
         
         return clean_variants
     
+    def _extract_amazon_description(self, soup):
+        """Extract comprehensive product description from Amazon 'About this item' section"""
+        try:
+            extracted_features = []
+            
+            # Primary extraction: Feature bullets from "About this item" section
+            feature_selectors = [
+                '#feature-bullets ul li .a-list-item',
+                '#featurebullets_feature_div ul li .a-list-item', 
+                '#feature-bullets ul li span',
+                '.a-unordered-list.a-vertical li .a-list-item'
+            ]
+            
+            for selector in feature_selectors:
+                features = soup.select(selector)
+                if features:
+                    logger.info(f"Found {len(features)} feature bullets using selector: {selector}")
+                    for feature in features:
+                        text = feature.get_text(strip=True)
+                        if text and len(text) > 10:  # Only meaningful content
+                            # Clean the text
+                            text = re.sub(r'\s+', ' ', text)  # Remove extra whitespace
+                            text = text.replace('\n', ' ').replace('\t', ' ')
+                            extracted_features.append(text)
+                    break  # Use first successful selector
+            
+            # Secondary extraction: Product specifications
+            if not extracted_features:
+                spec_selectors = [
+                    '#productDetails_techSpec_section_1 tr',
+                    '.a-section.a-spacing-small .a-row',
+                    '#technicalSpecifications_section_1 tr'
+                ]
+                
+                for selector in spec_selectors:
+                    specs = soup.select(selector)
+                    if specs and len(specs) > 2:  # At least a few specs
+                        logger.info(f"Found {len(specs)} specifications using selector: {selector}")
+                        for spec in specs[:5]:  # Limit to first 5 specs
+                            text = spec.get_text(strip=True)
+                            if text and len(text) > 5:
+                                text = re.sub(r'\s+', ' ', text)
+                                extracted_features.append(text)
+                        break
+            
+            # Tertiary extraction: Product overview/summary sections
+            if not extracted_features:
+                overview_selectors = [
+                    '#productOverview_feature_div .a-row',
+                    '.a-section.a-spacing-medium .a-row',
+                    '#bookDescription_feature_div .a-row'
+                ]
+                
+                for selector in overview_selectors:
+                    overviews = soup.select(selector)
+                    if overviews:
+                        logger.info(f"Found {len(overviews)} overview sections using selector: {selector}")
+                        for overview in overviews[:3]:  # Limit to first 3
+                            text = overview.get_text(strip=True)
+                            if text and len(text) > 15:
+                                text = re.sub(r'\s+', ' ', text)
+                                extracted_features.append(text)
+                        break
+            
+            # Format the extracted features
+            if extracted_features:
+                # Join features with periods, limit total length
+                description = '. '.join(extracted_features)
+                
+                # Clean up formatting
+                description = re.sub(r'\.\s*\.+', '.', description)  # Remove multiple periods
+                description = re.sub(r'\s+', ' ', description)  # Remove extra spaces
+                description = description.strip()
+                
+                # Limit length to prevent overly long descriptions
+                if len(description) > 800:
+                    description = description[:800].rsplit('.', 1)[0] + '.'
+                
+                logger.info(f"Successfully extracted Amazon description: {len(description)} chars")
+                logger.info(f"Description preview: {description[:100]}...")
+                return description
+            else:
+                logger.info("No Amazon features extracted - will use generic description")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error extracting Amazon description: {e}")
+            return None
+    
     def _extract_amazon_product_details(self, soup, product_url):
         """Extract detailed Amazon product information from parsed HTML"""
         try:
@@ -6822,6 +6922,17 @@ class UniversalScraper:
             # Combine all images
             all_images = ([main_image] if main_image else []) + additional_images[:10]
             
+            # Extract enhanced product description
+            amazon_features = self._extract_amazon_description(soup)
+            
+            # Create enhanced descriptions with concatenation
+            if amazon_features:
+                product_description = f"Quality {title} from Amazon with fast shipping and customer support. {amazon_features}"
+                meta_description = f"Buy {title} from Amazon at competitive prices. {amazon_features[:150]}..."
+            else:
+                product_description = f"Quality {title} from Amazon with fast shipping and customer support"
+                meta_description = f"Buy {title} from Amazon at competitive prices"
+            
             # Create product with correct type based on variants
             product_type = "Variant" if variants else "Single Product"
             if variants:
@@ -6838,8 +6949,8 @@ class UniversalScraper:
                 sku=sku,
                 category=category,
                 sub_category=sub_category,
-                product_description=f"Quality {title} from Amazon",
-                meta_tags_description=f"Buy {title} from Amazon",
+                product_description=product_description,
+                meta_tags_description=meta_description,
                 product_images=all_images[:1] if all_images else [],
                 additional_images=all_images[1:] if len(all_images) > 1 else [],
                 rating=rating,
