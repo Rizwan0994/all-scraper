@@ -2000,15 +2000,27 @@ class UniversalScraper:
                         final_additional_images = additional_images
                         logger.info(f"Product has no variants, storing {len(final_additional_images)} images as additional_images")
                     
-                    # Extract enhanced product description 
+                    # Extract enhanced product description from multiple sources
                     amazon_features = self._extract_amazon_description(product_soup or soup)
+                    aplus_content = self._extract_amazon_aplus_content(product_soup or soup)
                     
-                    # Create enhanced descriptions with concatenation
+                    # Combine all description sources
+                    description_parts = [f"Quality {title} from Amazon with fast shipping and customer support"]
+                    
                     if amazon_features:
-                        product_description = f"Quality {title} from Amazon with fast shipping and customer support. {amazon_features}"
-                        meta_description = f"Buy {title} from Amazon at competitive prices. {amazon_features[:150]}..."
+                        description_parts.append(amazon_features)
+                    
+                    if aplus_content:
+                        description_parts.append(aplus_content)
+                    
+                    # Create enhanced descriptions with all content
+                    product_description = ". ".join(description_parts)
+                    
+                    # Create meta description with preview of key features
+                    meta_preview = amazon_features or aplus_content or ""
+                    if meta_preview:
+                        meta_description = f"Buy {title} from Amazon at competitive prices. {meta_preview[:150]}..."
                     else:
-                        product_description = f"Quality {title} from Amazon with fast shipping and customer support"
                         meta_description = f"Buy {title} from Amazon at competitive prices"
                     
                     # Create the product
@@ -6745,6 +6757,80 @@ class UniversalScraper:
             logger.error(f"Error extracting Amazon description: {e}")
             return None
     
+    def _extract_amazon_aplus_content(self, soup):
+        """Extract A+ Enhanced Brand Content from Amazon product page"""
+        try:
+            aplus_content = []
+            
+            # Look for A+ content in the main aplus feature div
+            aplus_div = soup.find('div', id='aplus_feature_div')
+            if not aplus_div:
+                aplus_div = soup.find('div', class_='aplus-v2')
+            
+            if aplus_div:
+                logger.info("Found A+ content section, extracting...")
+                
+                # Extract text from various A+ module types
+                aplus_selectors = [
+                    # Headers and titles
+                    '.aplus-h1, .aplus-h2, .aplus-h3',
+                    # Paragraph content
+                    '.aplus-p1, .aplus-p2, .aplus-p3',
+                    # Module descriptions
+                    '.premium-aplus-module .aplus-module-2-description',
+                    '.premium-aplus-module .column-description',
+                    '.premium-aplus-module .card-description',
+                    # Tech specs from A+ content
+                    '.aplus-tech-spec-table td',
+                    # General text content in A+ modules
+                    '.premium-aplus .a-text-bold',
+                    '.premium-aplus p',
+                    # Comparison table content
+                    '.comparison-table .description'
+                ]
+                
+                for selector in aplus_selectors:
+                    elements = aplus_div.select(selector)
+                    for element in elements:
+                        text = element.get_text(strip=True)
+                        if text and len(text) > 10 and text not in aplus_content:
+                            # Clean and format text
+                            text = re.sub(r'\s+', ' ', text)
+                            text = text.replace('\n', ' ').replace('\t', ' ')
+                            # Skip generic text or navigation elements
+                            skip_phrases = ['buying options', 'next page', 'previous page', 'customer reviews']
+                            if not any(phrase in text.lower() for phrase in skip_phrases):
+                                aplus_content.append(text)
+                
+                # Extract feature highlights and specifications
+                feature_headers = aplus_div.select('.aplus-carousel-label, .aplus-goto-btn')
+                for header in feature_headers:
+                    text = header.get_text(strip=True)
+                    if text and len(text) > 3 and text not in aplus_content:
+                        aplus_content.append(text)
+            
+            if aplus_content:
+                # Join and format A+ content
+                aplus_text = '. '.join(aplus_content[:10])  # Limit to top 10 features
+                aplus_text = re.sub(r'\.\s*\.+', '.', aplus_text)  # Remove multiple periods
+                aplus_text = re.sub(r'\s+', ' ', aplus_text)  # Remove extra spaces
+                aplus_text = aplus_text.strip()
+                
+                # Limit length
+                if len(aplus_text) > 600:
+                    aplus_text = aplus_text[:600].rsplit('.', 1)[0] + '.'
+                
+                logger.info(f"Successfully extracted A+ content: {len(aplus_text)} chars")
+                logger.info(f"A+ content preview: {aplus_text[:100]}...")
+                return aplus_text
+            else:
+                logger.info("No A+ content found")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error extracting A+ content: {e}")
+            return None
+    
     def _extract_amazon_product_details(self, soup, product_url):
         """Extract detailed Amazon product information from parsed HTML"""
         try:
@@ -6922,15 +7008,27 @@ class UniversalScraper:
             # Combine all images
             all_images = ([main_image] if main_image else []) + additional_images[:10]
             
-            # Extract enhanced product description
+            # Extract enhanced product description from multiple sources
             amazon_features = self._extract_amazon_description(soup)
+            aplus_content = self._extract_amazon_aplus_content(soup)
             
-            # Create enhanced descriptions with concatenation
+            # Combine all description sources
+            description_parts = [f"Quality {title} from Amazon with fast shipping and customer support"]
+            
             if amazon_features:
-                product_description = f"Quality {title} from Amazon with fast shipping and customer support. {amazon_features}"
-                meta_description = f"Buy {title} from Amazon at competitive prices. {amazon_features[:150]}..."
+                description_parts.append(amazon_features)
+            
+            if aplus_content:
+                description_parts.append(aplus_content)
+            
+            # Create enhanced descriptions with all content
+            product_description = ". ".join(description_parts)
+            
+            # Create meta description with preview of key features
+            meta_preview = amazon_features or aplus_content or ""
+            if meta_preview:
+                meta_description = f"Buy {title} from Amazon at competitive prices. {meta_preview[:150]}..."
             else:
-                product_description = f"Quality {title} from Amazon with fast shipping and customer support"
                 meta_description = f"Buy {title} from Amazon at competitive prices"
             
             # Create product with correct type based on variants
