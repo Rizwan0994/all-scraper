@@ -232,6 +232,9 @@ class Product:
     product_description: str = ""
     meta_tags_description: str = ""
     
+    # Specifications (HTML format)
+    product_specs: str = ""
+    
     # Ratings & Reviews
     rating: float = 0.0
     review_count: int = 0
@@ -2004,6 +2007,9 @@ class UniversalScraper:
                     amazon_features = self._extract_amazon_description(product_soup or soup)
                     aplus_content = self._extract_amazon_aplus_content(product_soup or soup)
                     
+                    # Extract product specifications
+                    product_specifications = self._extract_amazon_specifications(product_soup or soup)
+                    
                     # Combine all description sources
                     description_parts = [f"Quality {title} from Amazon with fast shipping and customer support"]
                     
@@ -2035,6 +2041,7 @@ class UniversalScraper:
                         sub_category=sub_category,
                         product_description=product_description,
                         meta_tags_description=meta_description,
+                        product_specs=product_specifications,
                         product_images=all_images[:1] if all_images else [],  # First image as main
                         additional_images=final_additional_images,  # Store additional images based on variant status
                         rating=rating,
@@ -6831,6 +6838,120 @@ class UniversalScraper:
             logger.error(f"Error extracting A+ content: {e}")
             return None
     
+    def _extract_amazon_specifications(self, soup):
+        """Extract Amazon product specifications and return as formatted HTML table"""
+        try:
+            spec_tables = []
+            
+            # Primary selectors for Amazon specification tables
+            spec_selectors = [
+                '#productDetails_detailBullets_sections1',
+                '#productDetails_techSpec_section_1', 
+                '#prodDetails .a-keyvalue.prodDetTable',
+                '.a-keyvalue.prodDetTable',
+                '#productDetails_feature_div table',
+                '#technicalSpecifications_section_1 table'
+            ]
+            
+            for selector in spec_selectors:
+                tables = soup.select(selector)
+                if tables:
+                    logger.info(f"Found {len(tables)} specification table(s) using selector: {selector}")
+                    
+                    for table in tables:
+                        # Extract rows from the table
+                        rows = table.find_all('tr')
+                        if len(rows) > 0:
+                            spec_tables.append(table)
+                            logger.info(f"Added specification table with {len(rows)} rows")
+                    break  # Use first successful selector
+            
+            if spec_tables:
+                # Build clean HTML specifications
+                html_specs = ['<table class="product-specs">']
+                
+                for table in spec_tables:
+                    rows = table.find_all('tr')
+                    
+                    for row in rows:
+                        # Find header and value cells
+                        header_cell = row.find(['th', 'td'], class_=lambda x: x and ('prodDetSectionEntry' in x or 'a-color-secondary' in x))
+                        value_cell = row.find(['td'], class_=lambda x: x and ('prodDetAttrValue' in x or 'a-size-base' in x))
+                        
+                        # Alternative: if specific classes not found, try generic th/td
+                        if not header_cell:
+                            header_cell = row.find('th')
+                        if not value_cell:
+                            value_cell = row.find('td')
+                        
+                        if header_cell and value_cell:
+                            # Clean header text
+                            header_text = header_cell.get_text(strip=True)
+                            
+                            # Clean value text (handle complex content)
+                            value_text = self._clean_spec_value(value_cell)
+                            
+                            if header_text and value_text and len(header_text) > 1:
+                                # Skip common non-specification rows
+                                skip_headers = ['customer reviews', 'best sellers rank']
+                                if not any(skip in header_text.lower() for skip in skip_headers):
+                                    html_specs.append(f'  <tr><th>{self._escape_html(header_text)}</th><td>{self._escape_html(value_text)}</td></tr>')
+                
+                html_specs.append('</table>')
+                
+                if len(html_specs) > 2:  # More than just opening and closing tags
+                    final_html = '\n'.join(html_specs)
+                    logger.info(f"Successfully extracted Amazon specifications: {len(final_html)} chars")
+                    logger.info(f"Specifications preview: {final_html[:200]}...")
+                    return final_html
+                else:
+                    logger.info("No valid specification rows found")
+                    return ""
+            else:
+                logger.info("No Amazon specifications table found")
+                return ""
+                
+        except Exception as e:
+            logger.error(f"Error extracting Amazon specifications: {e}")
+            return ""
+    
+    def _clean_spec_value(self, cell):
+        """Clean specification value from HTML cell, handling nested content"""
+        try:
+            # Remove scripts and other unwanted elements
+            for unwanted in cell.find_all(['script', 'style', 'noscript']):
+                unwanted.decompose()
+            
+            # Handle special cases like Best Sellers Rank with links
+            if cell.find('ul'):
+                # Extract list items for rankings
+                items = []
+                for li in cell.find_all('li'):
+                    text = li.get_text(strip=True)
+                    if text:
+                        items.append(text)
+                return '; '.join(items) if items else cell.get_text(strip=True)
+            
+            # Get clean text
+            text = cell.get_text(strip=True)
+            # Clean up extra whitespace
+            text = re.sub(r'\s+', ' ', text)
+            return text
+            
+        except Exception as e:
+            logger.error(f"Error cleaning spec value: {e}")
+            return cell.get_text(strip=True) if cell else ""
+    
+    def _escape_html(self, text):
+        """Escape HTML special characters in text"""
+        if not text:
+            return ""
+        return (text.replace('&', '&amp;')
+                   .replace('<', '&lt;')
+                   .replace('>', '&gt;')
+                   .replace('"', '&quot;')
+                   .replace("'", '&#39;'))
+    
     def _extract_amazon_product_details(self, soup, product_url):
         """Extract detailed Amazon product information from parsed HTML"""
         try:
@@ -7012,6 +7133,9 @@ class UniversalScraper:
             amazon_features = self._extract_amazon_description(soup)
             aplus_content = self._extract_amazon_aplus_content(soup)
             
+            # Extract product specifications
+            product_specifications = self._extract_amazon_specifications(soup)
+            
             # Combine all description sources
             description_parts = [f"Quality {title} from Amazon with fast shipping and customer support"]
             
@@ -7049,6 +7173,7 @@ class UniversalScraper:
                 sub_category=sub_category,
                 product_description=product_description,
                 meta_tags_description=meta_description,
+                product_specs=product_specifications,
                 product_images=all_images[:1] if all_images else [],
                 additional_images=all_images[1:] if len(all_images) > 1 else [],
                 rating=rating,

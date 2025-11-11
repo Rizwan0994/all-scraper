@@ -208,11 +208,11 @@ class DatabaseManager:
                 order_count, product_reviews, disocunt_type, child_category, stock,
                 status, brand, created_by, updated_by, created_at, updated_at,
                 product_reviews_avg, store_id, product_reviews_sum, is_featured,
-                views_count, variation_type, source_url, h1
+                views_count, variation_type, source_url, h1, product_specs
             ) VALUES (
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s
+                %s, %s, %s, %s, %s
             )
             """
             
@@ -263,7 +263,8 @@ class DatabaseManager:
                 0,  # views_count
                 variation_type,  # variation_type - FIXED!
                 product.get('source_url', ''),  # source_url - ADDED!
-                None  # h1
+                None,  # h1
+                product.get('product_specs', '')  # product_specs - ADDED!
             )
             
             logger.info(f"Executing insert query with values: {values[:5]}...")  # Log first 5 values
@@ -1355,7 +1356,7 @@ class DatabaseManager:
                 product_reviews = %s, disocunt_type = %s, child_category = %s, stock = %s,
                 status = %s, brand = %s, updated_by = %s, updated_at = %s,
                 product_reviews_avg = %s, store_id = %s, product_reviews_sum = %s,
-                is_featured = %s, views_count = %s, variation_type = %s, source_url = %s, h1 = %s
+                is_featured = %s, views_count = %s, variation_type = %s, source_url = %s, h1 = %s, product_specs = %s
             WHERE id = %s
             """
             
@@ -1402,6 +1403,7 @@ class DatabaseManager:
                 'SINGLE',  # variation_type
                 product.get('source_url', ''),  # source_url - ADDED!
                 None,  # h1
+                product.get('product_specs', ''),  # product_specs - ADDED!
                 product_id  # WHERE id
             )
             
