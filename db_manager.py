@@ -22,6 +22,9 @@ class DatabaseManager:
         self._attribute_parent_cache = {}
         # maps parent_id -> { normalized_child_name: child_id }
         self._attribute_children_cache = {}
+        # Category caches for performance
+        self._main_category_cache = {}  # name -> category_id
+        self._sub_category_cache = {}   # (main_id, sub_name) -> category_id
         # Chunk manager for efficient data loading
         self.chunk_manager = ChunkManager()
     
@@ -227,6 +230,11 @@ class DatabaseManager:
             # CRITICAL FIX: Detect variation_type from scraped data
             variation_type = self._detect_variation_type(product)
             
+            # CATEGORY FIX: Get or create SUB category ID instead of hardcoded value
+            main_category = product.get('category', 'Electronics')
+            sub_category = product.get('sub_category', 'General')
+            child_category_id = self._get_or_create_sub_category(cursor, main_category, sub_category)
+            
             values = (
                 product.get('product_name', '')[:255],  # name
                 slug,  # slug
@@ -248,7 +256,7 @@ class DatabaseManager:
                 0,  # order_count
                 product.get('review_count', 0),  # product_reviews
                 '14',  # disocunt_type (ID 14 = Percentage)
-                '26',  # child_category (default)
+                child_category_id,  # child_category (SUB category ID)
                 '11',  # stock (ID 11 = Stock In)
                 '8',  # status (ID 8 = Published)
                 '16',  # brand (default)
@@ -315,6 +323,126 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Error detecting variation type: {e}")
             return 'SINGLE'  # Default fallback
+    
+    def _slugify(self, text):
+        """Convert text to URL-friendly slug format"""
+        import re
+        # Convert to lowercase and replace spaces/special chars with hyphens
+        slug = re.sub(r'[^\w\s-]', '', text.lower())
+        slug = re.sub(r'[\s_-]+', '-', slug)
+        return slug.strip('-')
+    
+    def _get_or_create_main_category(self, cursor, main_category_name):
+        """
+        Get or create MAIN category ID
+        
+        Args:
+            cursor: Database cursor
+            main_category_name: "Electronics", "Fashion", etc. (MAIN level)
+        
+        Returns:
+            int: MAIN category ID with parent_id=null
+        """
+        try:
+            # Check cache first
+            if main_category_name in self._main_category_cache:
+                return self._main_category_cache[main_category_name]
+            
+            # Try to find existing MAIN category
+            cursor.execute("""
+                SELECT id FROM categories 
+                WHERE type = 'MAIN' 
+                AND parent_id IS NULL 
+                AND (name = %s OR slug = %s)
+            """, (main_category_name, self._slugify(main_category_name)))
+            
+            result = cursor.fetchone()
+            if result:
+                main_id = result[0]
+                self._main_category_cache[main_category_name] = main_id
+                logger.debug(f"Found existing MAIN category '{main_category_name}' with ID: {main_id}")
+                return main_id
+            
+            # Create new MAIN category
+            cursor.execute("""
+                INSERT INTO categories (name, slug, type, parent_id, description, created_at, updated_at)
+                VALUES (%s, %s, 'MAIN', NULL, %s, NOW(), NOW())
+            """, (
+                main_category_name,
+                self._slugify(main_category_name),
+                f"Explore our {main_category_name} collection."
+            ))
+            
+            main_id = cursor.lastrowid
+            self._main_category_cache[main_category_name] = main_id
+            logger.info(f"Created new MAIN category '{main_category_name}' with ID: {main_id}")
+            return main_id
+            
+        except Exception as e:
+            logger.error(f"Error getting/creating MAIN category '{main_category_name}': {e}")
+            # Return default Electronics category ID as fallback
+            return 1
+    
+    def _get_or_create_sub_category(self, cursor, main_category_name, sub_category_name):
+        """
+        Get or create SUB category ID with proper parent relationship
+        
+        Hierarchy: MAIN -> SUB -> CHILD
+        We need SUB category ID for products table
+        
+        Args:
+            cursor: Database cursor
+            main_category_name: "Electronics", "Fashion" (MAIN level)
+            sub_category_name: "Mobile Phones", "Women's Clothing" (SUB level)
+        
+        Returns:
+            int: SUB category ID with proper parent_id pointing to MAIN
+        """
+        try:
+            cache_key = (main_category_name, sub_category_name)
+            
+            # Check cache first
+            if cache_key in self._sub_category_cache:
+                return self._sub_category_cache[cache_key]
+            
+            # Step 1: Get or create MAIN category
+            main_id = self._get_or_create_main_category(cursor, main_category_name)
+            
+            # Step 2: Look for existing SUB category under this MAIN
+            cursor.execute("""
+                SELECT id FROM categories 
+                WHERE type = 'SUB' 
+                AND parent_id = %s 
+                AND (name = %s OR slug = %s)
+            """, (main_id, sub_category_name, self._slugify(sub_category_name)))
+            
+            result = cursor.fetchone()
+            if result:
+                sub_id = result[0]
+                self._sub_category_cache[cache_key] = sub_id
+                logger.debug(f"Found existing SUB category '{sub_category_name}' under '{main_category_name}' with ID: {sub_id}")
+                return sub_id
+            
+            # Step 3: Create new SUB category under MAIN
+            cursor.execute("""
+                INSERT INTO categories (name, slug, type, parent_id, description, created_at, updated_at)
+                VALUES (%s, %s, 'SUB', %s, %s, NOW(), NOW())
+            """, (
+                sub_category_name,
+                self._slugify(sub_category_name), 
+                main_id,  # parent_id points to MAIN category
+                f"Discover top-quality {sub_category_name}."
+            ))
+            
+            sub_id = cursor.lastrowid
+            self._sub_category_cache[cache_key] = sub_id
+            logger.info(f"Created new SUB category '{sub_category_name}' under '{main_category_name}' with ID: {sub_id}")
+            return sub_id
+            
+        except Exception as e:
+            logger.error(f"Error getting/creating SUB category '{sub_category_name}' under '{main_category_name}': {e}")
+            # Return default Women SUB category ID as fallback
+            return 27
     
     def _validate_combination_format(self, combination):
         """Validate that combination matches expected database format.
@@ -1368,6 +1496,11 @@ class DatabaseManager:
             if 'hr' in delivery_time:
                 delivery_time = delivery_time.split()[0]
             
+            # CATEGORY FIX: Get or create SUB category ID instead of hardcoded value
+            main_category = product.get('category', 'Electronics')
+            sub_category = product.get('sub_category', 'General')
+            child_category_id = self._get_or_create_sub_category(cursor, main_category, sub_category)
+            
             values = (
                 product.get('product_name', '')[:255],  # name
                 slug,  # slug
@@ -1389,7 +1522,7 @@ class DatabaseManager:
                 0,  # order_count
                 product.get('review_count', 0),  # product_reviews
                 '14',  # disocunt_type (ID 14 = Percentage from types table)
-                '26',  # child_category (default)
+                child_category_id,  # child_category (SUB category ID)
                 '11',  # stock (ID 11 = Stock In from stock_status types)
                 '8',  # status (ID 8 = Published from status types)
                 '16',  # brand (default)

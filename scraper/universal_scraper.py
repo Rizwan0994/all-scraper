@@ -263,8 +263,8 @@ class Product:
 # Category mapping for better organization
 CATEGORY_MAPPING = {
     "Electronics": {
-        "keywords": ["phone", "laptop", "tablet", "headphones", "speaker", "camera", "tv", "computer", "xbox", "playstation", "nintendo", "gaming", "console", "controller", "gaming console", "wireless controller", "gaming controller", "ssd", "digital", "cloud-enabled", "gift card", "digital code"],
-        "subcategories": ["Smartphones", "Laptops", "Tablets", "Audio", "Cameras", "TVs", "Computers", "Gaming", "Gaming Consoles", "Gaming Accessories", "Digital Products"]
+        "keywords": ["phone", "laptop", "tablet", "headphones", "speaker", "camera", "tv", "computer", "xbox", "playstation", "nintendo", "gaming", "console", "controller", "gaming console", "wireless controller", "gaming controller", "ssd", "digital", "cloud-enabled", "gift card", "digital code", "thermal imaging", "infrared", "flir", "thermal camera", "ir camera", "heat detection", "temperature measurement"],
+        "subcategories": ["Smartphones", "Laptops", "Tablets", "Audio", "Cameras", "TVs", "Computers", "Gaming", "Gaming Consoles", "Gaming Accessories", "Digital Products", "Thermal Imaging"]
     },
     "Fashion": {
         "keywords": [
@@ -290,7 +290,7 @@ CATEGORY_MAPPING = {
             
             # Underwear & intimates  
             "briefs", "boxer", "boxer briefs", "panties", "thong", "sports bra", "bra",
-            "undershirt", "thermal", "long johns", "shapewear",
+            "undershirt", "long johns", "shapewear",
             
             # Brands that indicate fashion
             "nike", "adidas", "calvin klein", "tommy hilfiger", "levi's", "gap", "h&m",
@@ -350,7 +350,9 @@ def categorize_product(title, description=""):
     electronics_keywords = CATEGORY_MAPPING["Electronics"]["keywords"]
     if any(keyword in text for keyword in electronics_keywords):
         # Specific electronics subcategories
-        if any(term in text for term in ["headphones", "earphones", "earbuds", "speaker", "audio"]):
+        if any(term in text for term in ["thermal imaging", "infrared", "flir", "thermal camera", "ir camera", "heat detection", "moisture meter"]):
+            return "Electronics", "Thermal Imaging"
+        elif any(term in text for term in ["headphones", "earphones", "earbuds", "speaker", "audio"]):
             return "Electronics", "Audio"
         elif any(term in text for term in ["phone", "smartphone", "iphone", "samsung galaxy"]):
             return "Electronics", "Smartphones"
