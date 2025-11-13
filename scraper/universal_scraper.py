@@ -6843,10 +6843,11 @@ class UniversalScraper:
     def _extract_amazon_specifications(self, soup):
         """Extract Amazon product specifications and return as formatted HTML table"""
         try:
-            spec_tables = []
+            html_specs = ['<table class="product-specs">']
+            specs_found = False
             
-            # Primary selectors for Amazon specification tables
-            spec_selectors = [
+            # METHOD 1: Extract from table-based specifications (productDetails_detailBullets_sections1, etc.)
+            table_selectors = [
                 '#productDetails_detailBullets_sections1',
                 '#productDetails_techSpec_section_1', 
                 '#prodDetails .a-keyvalue.prodDetTable',
@@ -6855,62 +6856,116 @@ class UniversalScraper:
                 '#technicalSpecifications_section_1 table'
             ]
             
-            for selector in spec_selectors:
+            for selector in table_selectors:
                 tables = soup.select(selector)
                 if tables:
                     logger.info(f"Found {len(tables)} specification table(s) using selector: {selector}")
                     
                     for table in tables:
-                        # Extract rows from the table
                         rows = table.find_all('tr')
-                        if len(rows) > 0:
-                            spec_tables.append(table)
-                            logger.info(f"Added specification table with {len(rows)} rows")
-                    break  # Use first successful selector
-            
-            if spec_tables:
-                # Build clean HTML specifications
-                html_specs = ['<table class="product-specs">']
-                
-                for table in spec_tables:
-                    rows = table.find_all('tr')
+                        
+                        for row in rows:
+                            # Find header and value cells
+                            header_cell = row.find(['th', 'td'], class_=lambda x: x and ('prodDetSectionEntry' in x or 'a-color-secondary' in x))
+                            value_cell = row.find(['td'], class_=lambda x: x and ('prodDetAttrValue' in x or 'a-size-base' in x))
+                            
+                            # Alternative: if specific classes not found, try generic th/td
+                            if not header_cell:
+                                header_cell = row.find('th')
+                            if not value_cell:
+                                value_cell = row.find('td')
+                            
+                            if header_cell and value_cell:
+                                header_text = header_cell.get_text(strip=True)
+                                value_text = self._clean_spec_value(value_cell)
+                                
+                                if header_text and value_text and len(header_text) > 1:
+                                    # Skip common non-specification rows
+                                    skip_headers = ['customer reviews', 'best sellers rank']
+                                    if not any(skip in header_text.lower() for skip in skip_headers):
+                                        html_specs.append(f'  <tr><th>{self._escape_html(header_text)}</th><td>{self._escape_html(value_text)}</td></tr>')
+                                        specs_found = True
                     
-                    for row in rows:
-                        # Find header and value cells
-                        header_cell = row.find(['th', 'td'], class_=lambda x: x and ('prodDetSectionEntry' in x or 'a-color-secondary' in x))
-                        value_cell = row.find(['td'], class_=lambda x: x and ('prodDetAttrValue' in x or 'a-size-base' in x))
-                        
-                        # Alternative: if specific classes not found, try generic th/td
-                        if not header_cell:
-                            header_cell = row.find('th')
-                        if not value_cell:
-                            value_cell = row.find('td')
-                        
-                        if header_cell and value_cell:
-                            # Clean header text
-                            header_text = header_cell.get_text(strip=True)
-                            
-                            # Clean value text (handle complex content)
-                            value_text = self._clean_spec_value(value_cell)
-                            
-                            if header_text and value_text and len(header_text) > 1:
-                                # Skip common non-specification rows
-                                skip_headers = ['customer reviews', 'best sellers rank']
-                                if not any(skip in header_text.lower() for skip in skip_headers):
-                                    html_specs.append(f'  <tr><th>{self._escape_html(header_text)}</th><td>{self._escape_html(value_text)}</td></tr>')
+                    if specs_found:
+                        break  # Use first successful selector
+            
+            # METHOD 2: Extract from bullet-point specifications (detailBulletsWrapper_feature_div)
+            if not specs_found:
+                logger.info("No table specifications found, trying bullet-point format...")
                 
-                html_specs.append('</table>')
+                bullet_selectors = [
+                    '#detailBulletsWrapper_feature_div .detail-bullet-list li',
+                    '#detailBullets_feature_div .detail-bullet-list li', 
+                    '.detail-bullet-list li',
+                    '#feature-bullets li'
+                ]
                 
-                if len(html_specs) > 2:  # More than just opening and closing tags
-                    final_html = '\n'.join(html_specs)
-                    logger.info(f"Successfully extracted Amazon specifications: {len(final_html)} chars")
-                    logger.info(f"Specifications preview: {final_html[:200]}...")
-                    return final_html
-                else:
-                    logger.info("No valid specification rows found")
-                    return ""
+                for selector in bullet_selectors:
+                    bullet_items = soup.select(selector)
+                    if bullet_items:
+                        logger.info(f"Found {len(bullet_items)} specification bullet(s) using selector: {selector}")
+                        
+                        for item in bullet_items:
+                            # Extract bold header and regular text
+                            bold_elem = item.find('span', class_='a-text-bold')
+                            
+                            if bold_elem:
+                                header_text = bold_elem.get_text(strip=True)
+                                
+                                # Clean header (remove colon and extra characters)
+                                header_text = re.sub(r'[:\s\u200f\u200e\u202d\u202c\u202a\u202b‏‎]+$', '', header_text)
+                                
+                                # Get the value (text after the bold element)
+                                full_text = item.get_text(strip=True)
+                                value_text = full_text.replace(bold_elem.get_text(strip=True), '', 1).strip()
+                                value_text = re.sub(r'^[:\s\u200f\u200e\u202d\u202c\u202a\u202b‏‎]+', '', value_text)
+                                
+                                if header_text and value_text and len(header_text) > 1:
+                                    # Skip common non-specification items
+                                    skip_headers = ['customer reviews', 'best sellers rank', 'best seller', '#']
+                                    if not any(skip in header_text.lower() for skip in skip_headers):
+                                        html_specs.append(f'  <tr><th>{self._escape_html(header_text)}</th><td>{self._escape_html(value_text)}</td></tr>')
+                                        specs_found = True
+                        
+                        if specs_found:
+                            break  # Use first successful selector
+            
+            # METHOD 3: Fallback - Extract from any structured product details
+            if not specs_found:
+                logger.info("No bullet specifications found, trying fallback selectors...")
+                
+                fallback_selectors = [
+                    '#prodDetails dl',
+                    '.product-facts-detail dl',
+                    '#technical-data dl'
+                ]
+                
+                for selector in fallback_selectors:
+                    dl_elements = soup.select(selector)
+                    for dl in dl_elements:
+                        dt_elements = dl.find_all('dt')
+                        dd_elements = dl.find_all('dd')
+                        
+                        for dt, dd in zip(dt_elements, dd_elements):
+                            header_text = dt.get_text(strip=True)
+                            value_text = dd.get_text(strip=True)
+                            
+                            if header_text and value_text:
+                                html_specs.append(f'  <tr><th>{self._escape_html(header_text)}</th><td>{self._escape_html(value_text)}</td></tr>')
+                                specs_found = True
+                    
+                    if specs_found:
+                        break
+            
+            html_specs.append('</table>')
+            
+            if specs_found:
+                final_html = '\n'.join(html_specs)
+                logger.info(f"Successfully extracted Amazon specifications: {len(final_html)} chars")
+                logger.info(f"Specifications preview: {final_html[:200]}...")
+                return final_html
             else:
-                logger.info("No Amazon specifications table found")
+                logger.info("No Amazon specifications found using any method")
                 return ""
                 
         except Exception as e:
