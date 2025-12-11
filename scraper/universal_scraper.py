@@ -496,6 +496,65 @@ class UniversalScraper:
             return True
         return False
 
+    def _normalize_url(self, url: str) -> str:
+        """
+        Normalize URL by removing tracking parameters for better duplicate detection.
+        This ensures the same product with different tracking params is recognized as duplicate.
+        """
+        if not url:
+            return ""
+        
+        url = url.strip()
+        
+        # Remove common tracking parameters
+        tracking_params = [
+            'ref=', 'ref_=', 'pf_rd_', 'pd_rd_', 'qid=', 'sr=', 'keywords=',
+            'spm=', 'scm=', 'pvid=', 'algo_', 'aff_', 'utm_', 'fbclid=',
+            'gclid=', '_keyori=', 'from=', 'search_', 'click_', 'ga_',
+            'pdp_', 'mp=', 'smid=', 'psc=', 'spLa=', 'ns=', 'abbucket='
+        ]
+        
+        # Split URL into base and query string
+        if '?' in url:
+            base_url, query_string = url.split('?', 1)
+            
+            # Parse and filter query parameters
+            params = query_string.split('&')
+            filtered_params = []
+            
+            for param in params:
+                # Skip tracking parameters
+                should_skip = any(param.lower().startswith(tp.lower()) for tp in tracking_params)
+                if not should_skip and '=' in param:
+                    filtered_params.append(param)
+            
+            # Reconstruct URL with filtered params
+            if filtered_params:
+                url = base_url + '?' + '&'.join(filtered_params)
+            else:
+                url = base_url
+        
+        # Remove trailing slashes for consistency
+        url = url.rstrip('/')
+        
+        return url
+
+    def _is_url_already_scraped(self, url: str) -> bool:
+        """
+        Check if URL was already scraped - use BEFORE visiting product page.
+        This saves time by not re-scraping products we already have.
+        """
+        if not url:
+            return False
+        
+        normalized_url = self._normalize_url(url)
+        
+        if normalized_url in self.scraped_urls:
+            logger.debug(f"⏭️ Skipping already scraped URL: {url[:80]}...")
+            return True
+        
+        return False
+
     def _init_stealth_driver(self):
         """Initialize undetected Chrome driver with stealth configuration"""
         try:
@@ -1876,6 +1935,11 @@ class UniversalScraper:
                     # Enhanced link extraction using 2024 selectors
                     product_url = self._extract_amazon_link(item, title)
                     
+                    # ✅ EARLY DUPLICATE CHECK - Skip BEFORE visiting product page to save time
+                    if product_url and self._is_url_already_scraped(product_url):
+                        logger.info(f"⏭️ Skipping already scraped Amazon product: {title[:50]}...")
+                        continue
+                    
                     # Enhanced image extraction using 2024 selectors
                     main_image_url = self._extract_amazon_main_image(item)
                     
@@ -2832,6 +2896,11 @@ class UniversalScraper:
                     link_elem = item.select_one('.s-item__link')
                     product_url = link_elem['href'] if link_elem and link_elem.get('href') else ""
                     
+                    # ✅ EARLY DUPLICATE CHECK - Skip BEFORE visiting product page to save time
+                    if product_url and self._is_url_already_scraped(product_url):
+                        logger.info(f"⏭️ Skipping already scraped eBay product: {title[:50]}...")
+                        continue
+                    
                     # Auto-categorize
                     category, sub_category = categorize_product(title)
                     
@@ -2957,17 +3026,17 @@ class UniversalScraper:
             if not product.variants:
                 product.product_type = "Single Product"
             
-        # Check for duplicates based on multiple criteria
-        product_key = product.source_url.strip()
+        # Check for duplicates based on NORMALIZED URL
+        normalized_url = self._normalize_url(product.source_url)
         product_name_key = product.product_name.strip().lower()
         
         # Check URL duplicates ONLY - CRITICAL: Add to set BEFORE saving
-        if product_key in self.scraped_urls:
+        if normalized_url in self.scraped_urls:
             logger.info(f"🔄 Duplicate URL skipped: {product.product_name[:50]}...")
             return False
         
-        # Add to scraped_urls BEFORE saving to prevent race conditions
-        self.scraped_urls.add(product_key)
+        # Add NORMALIZED URL to scraped_urls BEFORE saving to prevent race conditions
+        self.scraped_urls.add(normalized_url)
         
         # 🎯 PERFECT EXTRACTION - No AI verification needed!
         logger.info(f"🎯 Product ready to save: {len(product.variants)} variants extracted perfectly!")
@@ -4687,10 +4756,12 @@ class UniversalScraper:
                 # Count existing products without storing them
                 self.saved_count = len(data)
                 
-                # Build lightweight tracking
+                # Build lightweight tracking with NORMALIZED URLs for better duplicate detection
                 for item in data:
                     product = Product(**item)
-                    self.scraped_urls.add(product.source_url)
+                    # ✅ Use normalized URL for consistent duplicate detection
+                    normalized_url = self._normalize_url(product.source_url)
+                    self.scraped_urls.add(normalized_url)
                     self.site_counts[product.source_site] = self.site_counts.get(product.source_site, 0) + 1
                     self.last_product_id += 1
                 
@@ -4698,7 +4769,7 @@ class UniversalScraper:
                 self.current_stats['total_products'] = self.saved_count
                 self.current_stats['site_breakdown'] = self.site_counts.copy()
                 
-                logger.info(f"✅ Loaded {self.saved_count} existing products for streaming mode")
+                logger.info(f"✅ Loaded {self.saved_count} existing products for streaming mode (URLs normalized for dedup)")
             else:
                 logger.info("No existing products found - starting fresh")
         except Exception as e:
@@ -4839,6 +4910,11 @@ class UniversalScraper:
                             link_elem = item.find('a')
                             product_url = f"https:{link_elem['href']}" if link_elem and link_elem.get('href') else search_url
                             
+                            # ✅ EARLY DUPLICATE CHECK - Skip BEFORE visiting product page to save time
+                            if product_url and self._is_url_already_scraped(product_url):
+                                logger.info(f"⏭️ Skipping already scraped Daraz product: {title[:50]}...")
+                                continue
+                            
                             category, sub_category = categorize_product(title)
                             
                             # Extract variants
@@ -4972,6 +5048,11 @@ class UniversalScraper:
                     if product_url and not product_url.startswith('http'):
                         product_url = f"https://www.aliexpress.com{product_url}"
                     
+                    # ✅ EARLY DUPLICATE CHECK - Skip BEFORE visiting product page to save time
+                    if product_url and self._is_url_already_scraped(product_url):
+                        logger.info(f"⏭️ Skipping already scraped AliExpress product: {title[:50]}...")
+                        continue
+                    
                     # Auto-categorize
                     category, sub_category = categorize_product(title)
                     
@@ -5098,6 +5179,11 @@ class UniversalScraper:
                     product_url = link_elem['href'] if link_elem and link_elem.get('href') else ""
                     if product_url and not product_url.startswith('http'):
                         product_url = f"https://www.etsy.com{product_url}"
+                    
+                    # ✅ EARLY DUPLICATE CHECK - Skip BEFORE visiting product page to save time
+                    if product_url and self._is_url_already_scraped(product_url):
+                        logger.info(f"⏭️ Skipping already scraped Etsy product: {title[:50]}...")
+                        continue
                     
                     # Auto-categorize
                     category, sub_category = categorize_product(title)
@@ -5246,6 +5332,11 @@ class UniversalScraper:
                     product_url = link_elem['href'] if link_elem and link_elem.get('href') else ""
                     if product_url and not product_url.startswith('http'):
                         product_url = f"https://www.valuebox.pk{product_url}"
+                    
+                    # ✅ EARLY DUPLICATE CHECK - Skip BEFORE visiting product page to save time
+                    if product_url and self._is_url_already_scraped(product_url):
+                        logger.info(f"⏭️ Skipping already scraped ValueBox product: {title[:50]}...")
+                        continue
                     
                     # Auto-categorize
                     category, sub_category = categorize_product(title)
